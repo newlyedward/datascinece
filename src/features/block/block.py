@@ -4,7 +4,7 @@ block
 ~~~~~~~~~~~~
 This module contains the identification of extremes, segments and blocks.
 """
-from log import LogHandler
+from src.log import LogHandler
 # from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
@@ -12,7 +12,7 @@ import scipy.signal as signal
 
 # TODO 改用动态接口
 # get_history_hq_api(code, start=None, end=None, freq='d')
-from tdx import get_future_hq
+from src.data.tdx import get_future_hq
 
 get_history_hq_api = get_future_hq
 
@@ -325,17 +325,12 @@ def get_history_hq(code, start=None, end=None, freq='d'):
     if get_history_hq_api:
         return get_history_hq_api(code=code, start=start, end=end, freq=freq)
     else:  # only for test
-        from pytdx.reader import TdxExHqDailyBarReader
-        reader = TdxExHqDailyBarReader()
-        temp_df = reader.get_df(r"D:\Trade\TDX\vipdoc\ds\lday\28#SRL9.day")
-
-        return temp_df.loc[:, ['high', 'low']]
+        return None
 
 
 if __name__ == "__main__":
     from datetime import datetime, timedelta
-    from block import TsBlock
-    import pandas as pd
+    from src.features.block import TsBlock
 
     today = datetime.today()
     observation = 365

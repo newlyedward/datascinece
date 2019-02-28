@@ -6,9 +6,9 @@ import pandas as pd
 
 from src.log import LogHandler
 
-from .setting import tdx_dir, MARKET2TDX_CODE, MARKET_DIR, PERIOD_DIR, PERIOD_EXT
+from src.data.tdx.setting import tdx_dir, MARKET2TDX_CODE, MARKET_DIR, PERIOD_DIR, PERIOD_EXT
 
-log = LogHandler(os.path.basename(__file__))
+log = LogHandler(os.path.basename('tdx.hq.log'))
 
 
 def int2date(x):

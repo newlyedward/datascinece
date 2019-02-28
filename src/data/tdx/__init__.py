@@ -9,7 +9,7 @@ from src.log import LogHandler
 from .hq import get_future_day_hq, get_future_min_hq
 from .basic import get_future_basic
 
-log = LogHandler('tdx')
+log = LogHandler('tdx.log')
 
 # TODO 周期转换的处理， 日内的数据由于有夜盘，处理起来较复杂
 # tdx处理是夜盘数据算作下一个交易日，resample函数处理起来会按照时间排序

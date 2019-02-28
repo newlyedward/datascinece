@@ -6,8 +6,11 @@ import time
 import numpy as np
 import pandas as pd
 
+from src.log import LogHandler
 from src.data.util import get_html_tree, get_html_text, convert_percent
-from .setting import *
+from .setting import *   # TODO 单文件运行时 import 错误
+
+log = LogHandler('jsl')
 
 
 def is_not_trading():
@@ -28,13 +31,14 @@ def get_convertible_list():
 
     # 文件存在并且不是交易时间，还需要判断文件足够新才行
     if file_path.exists() and is_not_trading():
-        convertible_df = pd.read_csv(file_name)
+        convertible_df = pd.read_csv(file_name, encoding='gb2312')
     else:
         convertible_df = pd.DataFrame([x['cell'] for x in json.loads(get_html_text(CBS_URL))['rows']])
         convertible_df['premium_rt'] = convertible_df['premium_rt'].apply(convert_percent)
         convertible_df['ytm_rt_tax'] = convertible_df['ytm_rt_tax'].apply(convert_percent)
         convertible_df['ytm_rt'] = convertible_df['ytm_rt'].apply(convert_percent)
         convertible_df.to_csv(file_name, encoding='gb2312')
+    # TODO 将日期转换为字符 pd.to_datetime
     return convertible_df
 
 
@@ -65,8 +69,8 @@ def get_stocks_detail(stocks_id=None):
         stocks_id = stocks_id['stock_id'].tolist()
 
     # 文件存在并且不是交易时间，还需要判断文件足够新才行
-    if file_path.exists(file_path) and is_not_trading():
-        df = pd.read_csv(file_name)
+    if file_path.exists() and is_not_trading():
+        df = pd.read_csv(file_name, encoding='gb2312')
         # 根据stocks code 返回需要的数据
     else:
         stocks_detail = []
@@ -76,9 +80,9 @@ def get_stocks_detail(stocks_id=None):
             try:
                 stock_detail = get_stock_detail(stock_id[2:])
             except TypeError:
-                print("Stock code is not available!")
+                log.warning("Stock code is not available!")
                 continue
-            print(stock_id+":successful!")
+            log.info(stock_id+":successful!")
             stock_detail.append(stock_id)
             stocks_detail.append(stock_detail)
 

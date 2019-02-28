@@ -5,7 +5,7 @@ import pandas as pd
 
 from .setting import tdx_dir
 
-log = LogHandler(os.path.basename(__file__))
+log = LogHandler(os.path.basename('tdx.basic.log'))
 
 
 def get_future_basic():
