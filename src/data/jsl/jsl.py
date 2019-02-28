@@ -34,7 +34,7 @@ def get_convertible_list():
         convertible_df['premium_rt'] = convertible_df['premium_rt'].apply(convert_percent)
         convertible_df['ytm_rt_tax'] = convertible_df['ytm_rt_tax'].apply(convert_percent)
         convertible_df['ytm_rt'] = convertible_df['ytm_rt'].apply(convert_percent)
-        convertible_df.to_csv(file_name)
+        convertible_df.to_csv(file_name, encoding='gb2312')
     return convertible_df
 
 
@@ -89,7 +89,7 @@ def get_stocks_detail(stocks_id=None):
 
         df = pd.DataFrame(stocks_detail, columns=columns)
         df['debt_with_interest'] = df['debt_with_interest'].apply(convert_percent)
-        df.to_csv(file_name)
+        df.to_csv(file_name, encoding='gb2312')
     if stocks_id:
         return df[df['stock_id'].isin(stocks_id)]
     else:
