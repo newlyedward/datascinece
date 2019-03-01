@@ -18,7 +18,7 @@ get_history_hq_api = get_future_hq
 
 FREQ = ('5m', '30m', 'h', 'd', 'w', 'm', 'q')
 
-log = LogHandler('block')
+log = LogHandler('block.log')
 
 
 class TsBlock:
@@ -280,9 +280,7 @@ def get_kline_segments(higher, lower):
     if not (flag[0] or flag[1] or flag[2] or flag[3]):
         return [higher, lower]
 
-    # 处理连续的高低点中，高点比低点低的情况
-
-    # 删除无效的高低点
+    # 删除连续高低点
     if flag[0]:
         hl_df.loc[index[0], 'high'] = np.nan  # 向后删除较低高点
     if flag[1]:
@@ -295,6 +293,17 @@ def get_kline_segments(higher, lower):
         higher = hl_df['high'].dropna()
     if flag[2] or flag[3]:
         lower = hl_df['low'].dropna()
+
+    # 处理连续的高低点中，高点比低点低的情况, higher,lower 数据长度不一致
+    # TODO   相邻高低点出现低点比高点高的情况
+    bflag = higher.values > lower.values
+    if not bflag.all():
+        higher = higher[bflag], lower = lower[bflag]
+        bflag = higher.values > lower.shift(1).fillna(0).values
+        if not bflag.all():
+            higher = higher[bflag]
+            bflag = np.roll(bflag, -1)
+            lower = lower[bflag]
 
     # 合并高低点后再处理一次
     return get_kline_segments(higher, lower)

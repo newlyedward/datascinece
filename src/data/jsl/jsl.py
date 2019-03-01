@@ -10,7 +10,7 @@ from src.log import LogHandler
 from src.data.util import get_html_tree, get_html_text, convert_percent
 from .setting import *   # TODO 单文件运行时 import 错误
 
-log = LogHandler('jsl')
+log = LogHandler('jsl.log')
 
 
 def is_not_trading():

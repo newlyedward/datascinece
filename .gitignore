@@ -84,3 +84,8 @@ target/
 # vim
 *.swp
 *.swo
+*.xlsx
+*.csv
+log/
+notebooks/log/
+
