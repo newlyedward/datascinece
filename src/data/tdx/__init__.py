@@ -41,7 +41,7 @@ def get_future_hq(code, start=dt.datetime(1970, 1, 1), end=None, freq='d'):
         log.warning(code, 'is not listed!')
     market = future_basic_info.loc[category, 'market']
 
-    log.info(freq)
+    log.info('freq={}'.format(freq))
 
     if freq == 'd':
         return get_future_day_hq(market=market, code=code, start=start, end=end)

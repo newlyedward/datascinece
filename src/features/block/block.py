@@ -35,7 +35,7 @@ class TsBlock:
         :param start: datetime
         :param end: datetime
         :param freq: ('5m', '30m', 'd', 'w')
-        :return: [pd.Series, pd.Series]
+        :return: [pd.DataFrame/Series, pd.DataFrame/Series]  升级形成的extreme不带kline_no.
         """
 
         temp_extreme = self.__extremes[freq]
@@ -54,8 +54,8 @@ class TsBlock:
             high, low = self.get_segments(start=start, end=end, freq=FREQ[index])
         else:
             temp_df = get_history_hq(self.code, start=start, end=end, freq=freq)
-            high = temp_df.high
-            low = temp_df.low
+            high = temp_df[['high', 'kindex']]
+            low = temp_df[['low', 'kindex']]
 
         temp_extreme = get_kline_extremes(high, low)
         self.__extremes[freq] = temp_extreme
@@ -259,28 +259,28 @@ def identify_blocks(higher, lower):
     block_df = block_df.append(insert_row, ignore_index=True)
     return block_df.set_index('start_dt')
 
+# TODO 增加对 删除连续高低点；删除低点比高点高的段；删除高低点较近的段 的测试用例
 
-def get_kline_segments(higher, lower):
+
+def remove_continued_extremes(higher, lower):
     """
-    identify the segments from high/low extremes
-    :param higher: pd.Series, index is datetime
-    :param lower:  pd.Series, index is datetime
+    remove continued [high, high] or [low, low] extreme
+    删除连续高高或者低低点中的较低高点和较高低点,相等的情况，删除后面的点
+    :param higher: pd.Series, columns=[high], index is datetime
+    :param lower:  pd.Series, columns=[low], index is datetime
     :return: [pd.Series, pd.Series]
     """
-    hl_df = pd.concat([higher, lower], axis=1, join='outer')
+    hl_df = pd.concat([higher.high, lower.low], axis=1, join='outer')
     # 比较前后高低点
     df1 = hl_df.diff()
     df2 = hl_df.diff(-1)
 
-    # TODO   需要删除相隔较近的高低点
-    # 需要删除的高低点，连续高低点中的较低高点和较高低点,相等的情况，删除后面的点
     index = [df1['high'] <= 0, df2['high'] < 0, df1['low'] >= 0, df2['low'] > 0]
     flag = [x.any() for x in index]
 
     if not (flag[0] or flag[1] or flag[2] or flag[3]):
         return [higher, lower]
 
-    # 删除连续高低点
     if flag[0]:
         hl_df.loc[index[0], 'high'] = np.nan  # 向后删除较低高点
     if flag[1]:
@@ -294,30 +294,93 @@ def get_kline_segments(higher, lower):
     if flag[2] or flag[3]:
         lower = hl_df['low'].dropna()
 
-    # 处理连续的高低点中，高点比低点低的情况, higher,lower 数据长度不一致
-    # TODO   相邻高低点出现低点比高点高的情况
-    bflag = higher.values > lower.values
-    if not bflag.all():
-        higher = higher[bflag], lower = lower[bflag]
-        bflag = higher.values > lower.shift(1).fillna(0).values
-        if not bflag.all():
-            higher = higher[bflag]
-            bflag = np.roll(bflag, -1)
-            lower = lower[bflag]
+    return remove_continued_extremes(higher, lower)
 
-    # 合并高低点后再处理一次
-    return get_kline_segments(higher, lower)
+
+def remove_fake_extreme(higher, lower):
+    """
+    删除比相邻极点高的低点和比相邻极点低的高点，包括了高点/低点连续出现的情况
+    :param higher: pd.DataFrame, columns=[high, kindex], index is datetime
+    :param lower:  pd.DataFrame, columns=[low, kindex], index is datetime
+    :return: [pd.Series, pd.Series]
+    """
+
+    # 检测输入类型
+    assert isinstance(higher, pd.DataFrame)
+    assert isinstance(higher, pd.DataFrame)
+
+    # 将极值点拼接为一个DataFrame
+    high_df = higher.rename(columns={'high': 'extreme'})
+    high_df['hl_flag'] = 'high'
+
+    # low_df = lower.low.to_frame('extreme')
+    low_df = lower.rename(columns={'low': 'extreme'})
+    low_df['hl_flag'] = 'low'
+
+    hl_df = high_df.append(low_df).sort_index()
+    hl_df['sn'] = range(len(hl_df))
+
+    # TODO 对在同一根k线上的极值点进行处理，转换为高高相邻和低低相邻
+    # 较近的k线可以使用同样的处理方式
+
+    hl_diff_left = hl_df.extreme.diff()
+    hl_diff_right = hl_df.extreme.diff(-1)
+
+    # 和前一个极值点点比较，没有比较的情况假设是合理的极值点
+    hl_diff_left[0] = -1 if hl_df.hl_flag[0] == 'low' else 1
+    hl_diff_right[-1] = -1 if hl_df.hl_flag[-1] == 'low' else 1
+
+    # # 相等的情况保留后一个点
+    flag = np.logical_or(hl_diff_left * hl_diff_right > 0,
+                         hl_diff_left == 0)
+    handled_df = hl_df[flag.values]
+    # # 相等的情况保留后一个点
+    # # TODO 高低点在一根k线上,会使数据增多
+    # l_left_flag = hl_diff_left.loc[hl_df['hl_flag'] == 'low'] <= 0
+    # h_left_flag = hl_diff_left.loc[hl_df['hl_flag'] == 'high'] >= 0
+    # l_right_flag = hl_diff_right.loc[hl_df['hl_flag'] == 'low'] < 0
+    # h_right_flag = hl_diff_right.loc[hl_df['hl_flag'] == 'high'] > 0
+    #
+    # h_flag = np.logical_and(h_left_flag, h_right_flag)
+    # l_flag = np.logical_and(l_left_flag, l_right_flag)
+    #
+    # # TODO 高低点在一根k线上，是否不需要递归处理
+    # handled_higher = higher[h_flag.values]
+    # handled_lower = lower[l_flag.values]
+
+    return handled_df[handled_df['hl_flag'] == 'high'], \
+           handled_df[handled_df['hl_flag'] == 'low']
+
+
+def get_kline_segments(higher, lower):
+    """
+    identify the segments from high/low extremes
+    :param higher: pd.DataFame/Series, columns=[high, [kindex]], index is datetime
+    :param lower:  pd.DataFame/Series, columns=[low, [kindex]], index is datetime
+    :return: [pd.Series, pd.Series] segment的kline_no.可以在基础extreme里查询
+    """
+
+    # 删除连续高高或者低低点中的较低高点和较高低点,相等的情况，删除后面的点
+    temp_higher, temp_lower = remove_fake_extreme(higher, lower)
+
+    # temp_higher, temp_lower = remove_fake_extreme(temp_higher, temp_lower)
+
+    # TODO   极值点离得较近的情况
+
+    # if isinstance(higher, pd.DataFrame):
+    #     hl_df = pd.merge(higher, lower, left_index=True, right_index=True, how='outer', on=['kindex'])
+    return temp_higher, temp_lower
 
 
 def get_kline_extremes(high, low):
     """
-    calculate the get_kline_extremes values of high and low
-    :param high: pd.Series, index is datetime
-    :param low:  pd.Series, index is datetime
-    :return: [pd.Series, pd.Series]
+    calculate the extremes value of high and low
+    :param high: pd.DataFame, columns=[high, kindex], index is datetime
+    :param low:  pd.DataFame, columns=[low, kindex], index is datetime
+    :return: [pd.DataFame, pd.DataFame], columns=[high/low, kindex]
     """
-    higher = high.iloc[signal.argrelextrema(high.values, np.greater)]
-    lower = low.iloc[signal.argrelextrema(-low.values, np.greater)]
+    higher = high.iloc[signal.argrelextrema(high.high.values, np.greater)]
+    lower = low.iloc[signal.argrelextrema(-low.low.values, np.greater)]
 
     return [higher, lower]
 
@@ -329,26 +392,30 @@ def get_history_hq(code, start=None, end=None, freq='d'):
     :param start: datetime
     :param end: datetime
     :param freq: '5m', '30m', 'd', 'w'
-    :return: pd.Dataframe columns=['high', 'low']
+    :return: pd.Dataframe columns=['high', 'low', 'serial_number]
     """
     if get_history_hq_api:
-        return get_history_hq_api(code=code, start=start, end=end, freq=freq)
+        temp_hq_df = get_history_hq_api(code=code, start=start, end=end, freq=freq)
+        temp_hq_df['kindex'] = range(len(temp_hq_df))
+        return temp_hq_df[['high', 'low', 'kindex']]
     else:  # only for test
         return None
 
 
 if __name__ == "__main__":
     from datetime import datetime, timedelta
-    from src.features.block import TsBlock
+
+    # from src.features.block import TsBlock
 
     today = datetime.today()
-    observation = 365
+    observation = 250
     start = today - timedelta(observation)
-    end = today - timedelta(7)
+    # end = today - timedelta(7)
 
-    block = TsBlock("SRL9")
-    segment = block.get_segments()
-    df = pd.concat(segment, axis=1, join='outer').fillna(0)
-    block_df = block.get_blocks()
+    block = TsBlock("ML8")
+    segment = block.get_segments(start=start)
+    # df = pd.concat(segment, axis=1, join='outer').fillna(0)
+    # block_df = block.get_blocks()
 
     # TODO external api 如何使用
+    # ml8 2018 9-10month  发现错误的段，低点比高点高·······························

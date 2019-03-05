@@ -1,3 +1,4 @@
+scipy
 lxml
 cufflinks
 numpy
