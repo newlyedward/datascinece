@@ -89,9 +89,9 @@ def get_future_day_hq(market, code, start=None, end=None):
     hq_day_df = _get_future_day_hq(f)
 
     if end:
-        return hq_day_df[end > hq_day_df.index > start]
+        return hq_day_df.loc[start: end]
     else:
-        return hq_day_df[hq_day_df.index > start]
+        return hq_day_df.loc[start:]
 
 
 def get_future_min_hq(market, code, start=None, end=None, freq='5m'):
@@ -150,9 +150,9 @@ def get_future_min_hq(market, code, start=None, end=None, freq='5m'):
 
     hq_min_df = _get_future_min_hq(f)
     if end:
-        return hq_min_df[end > hq_min_df.index > start]
+        return hq_min_df.loc[start: end]
     else:
-        return hq_min_df[hq_min_df.index > start]
+        return hq_min_df.loc[start:]
 
 
 if __name__ == '__main__':

@@ -2,7 +2,7 @@
 """
 block
 ~~~~~~~~~~~~
-This module contains the identification of extremes, segments and blocks.
+This module contains the identification of peaks, segments and blocks.
 """
 from src.log import LogHandler
 # from datetime import datetime, timedelta
@@ -25,67 +25,67 @@ class TsBlock:
 
     def __init__(self, code):
         self.code = code
-        self.__extremes = dict.fromkeys(FREQ)
-        self.__segments = dict.fromkeys(FREQ)
+        self.__peaks = dict.fromkeys(FREQ, pd.DataFrame())
+        self.__segments = dict.fromkeys(FREQ, pd.DataFrame())
         self.__blocks = dict.fromkeys(FREQ, pd.DataFrame())
 
-    def get_extremes(self, start=None, end=None, freq='d'):
+    def get_peaks(self, start=None, end=None, freq='d'):
         """
         only append the data at the end,  ascending sort
         :param start: datetime
         :param end: datetime
         :param freq: ('5m', '30m', 'd', 'w')
-        :return: [pd.DataFrame/Series, pd.DataFrame/Series]  升级形成的extreme不带kline_no.
+        :return: [pd.DataFrame/Series, pd.DataFrame/Series]  升级形成的peak不带kline_no.
         """
 
-        temp_extreme = self.__extremes[freq]
+        temp_peak = self.__peaks[freq]
 
-        if temp_extreme:
-            if start and end:
-                return [temp_extreme[0][start:end], temp_extreme[1][start:end]]
-            elif start:
-                return [temp_extreme[0][start:], temp_extreme[1][start:]]
-            elif end:
-                return [temp_extreme[0][:end], temp_extreme[1][:end]]
+        if temp_peak.empty:
+            if freq in ('5m', 'd'):
+                temp_df = get_history_hq(self.code, start=start, end=end, freq=freq)
+                hq_df = temp_df[['high', 'low', 'kindex']]
             else:
-                return temp_extreme
-        elif freq not in ('5m', 'd'):
-            index = FREQ.index(freq) - 1
-            high, low = self.get_segments(start=start, end=end, freq=FREQ[index])
+                index = FREQ.index(freq) - 1
+                hq_df = self.get_segments(start=start, end=end, freq=FREQ[index])
+
+            temp_peak = get_kline_peaks(hq_df)
+            self.__peaks[freq] = temp_peak
+            return temp_peak
+        elif start and end:
+            return temp_peak[start:end]
+        elif start:
+            return temp_peak[start:]
+        elif end:
+            return temp_peak[:end]
         else:
-            temp_df = get_history_hq(self.code, start=start, end=end, freq=freq)
-            high = temp_df[['high', 'kindex']]
-            low = temp_df[['low', 'kindex']]
-
-        temp_extreme = get_kline_extremes(high, low)
-        self.__extremes[freq] = temp_extreme
-
-        return temp_extreme
+            return temp_peak
 
     def get_segments(self, start=None, end=None, freq='d'):
         """
-                only append the data at the end,  ascending sort
-                :param start: datetime
-                :param end: datetime
-                :param freq: ('5m', '30m', 'd', 'w')
-                :return: [pd.Series, pd.Series]
-                """
-        temp_segment = self.__segments[freq]
 
-        if temp_segment:
-            if start and end:
-                return [temp_segment[0][start:end], temp_segment[1][start:end]]
-            elif start:
-                return [temp_segment[0][start:], temp_segment[1][start:]]
-            elif end:
-                return [temp_segment[0][:end], temp_segment[1][:end]]
-            else:
-                return temp_segment
+        :param start: datetime
+        :param end: datetime
+        :param freq: ('5m', '30m', 'd', 'w')
+        :return: [pd.Series, pd.Series]
+        """
+        segment_df = self.__segments[freq]
+
+        if segment_df.empty:
+            peak_df = self.get_peaks(start=start, end=end, freq=freq)
+            segment_df = get_kline_segments(peak_df)
+            self.__segments[freq] = segment_df
+            return segment_df
         else:
-            higher, lower = self.get_extremes(start=start, end=end, freq=freq)
-            temp_segment = get_kline_segments(higher, lower)
-            self.__segments[freq] = temp_segment
-            return temp_segment
+            if start and end:
+                return segment_df[start:end]
+            elif start:
+                return segment_df[start:]
+            elif end:
+                return segment_df[:end]
+            else:
+                return segment_df
+
+
 
     def get_blocks(self, start=None, end=None, freq='d'):
         """
@@ -94,7 +94,7 @@ class TsBlock:
         :param end: datetime
         :param freq: ('5m', '30m', 'd', 'w')
         :return: pd.Dataframe   columns=['end_dt', 'block_high', 'block_low', 'block_highest', 'block_lowest',
-                                         'segment_num', 'block_flag', 'block_hl_flag', 'top_bottom_flag']
+                                         'segment_num', 'block_flag', 'block_type', 'top_bottom_flag']
         """
 
         temp_block = self.__blocks[freq]
@@ -118,7 +118,7 @@ class TsBlock:
 
     def get_current_status(self, start=None, end=None, freq='d'):
         temp_block_df = self.get_blocks(start=None, end=None, freq=freq)
-        dt = temp_block_df.loc[temp_block_df['No.'] == 0, ['block_flag', 'No.', 'segment_num', 'block_hl_flag']].tail(
+        dt = temp_block_df.loc[temp_block_df['No.'] == 0, ['block_flag', 'No.', 'segment_num', 'block_type']].tail(
             2).index[0]
         return temp_block_df.loc[dt:]
 
@@ -127,7 +127,7 @@ def identify_blocks_relation(block_df):
     block_relation_df = block_df[block_df['segment_num'] > 3].diff()[1:]
     temp_df = block_df.copy(deep=True)
     temp_df['block_flag'] = '-'
-    temp_df['block_hl_flag'] = '-'
+    temp_df['block_type'] = '-'
     temp_df['No.'] = '_'
     # temp_df['No_include_3'] = '_'
     # temp_df['top_bottom_flag'] = '-'
@@ -149,16 +149,16 @@ def identify_blocks_relation(block_df):
             block_flag = 'included'
 
         if row.block_highest > 0 and row.block_lowest > 0:
-            block_hl_flag = 'up'
+            block_type = 'up'
         elif row.block_highest < 0 and row.block_lowest < 0:
-            block_hl_flag = 'down'
+            block_type = 'down'
         elif row.block_highest > 0 > row.block_lowest:
-            block_hl_flag = 'include'
+            block_type = 'include'
         elif row.block_highest < 0 < row.block_lowest:
-            block_hl_flag = 'included'
+            block_type = 'included'
 
         temp_df.loc[current_dt, 'block_flag'] = block_flag
-        temp_df.loc[current_dt, 'block_hl_flag'] = block_hl_flag
+        temp_df.loc[current_dt, 'block_type'] = block_type
 
         block_index = block_index + 1
 
@@ -262,127 +262,115 @@ def identify_blocks(higher, lower):
 # TODO 增加对 删除连续高低点；删除低点比高点高的段；删除高低点较近的段 的测试用例
 
 
-def remove_continued_extremes(higher, lower):
+def sort_one_candle_peaks(peak_df, invert=True):
     """
-    remove continued [high, high] or [low, low] extreme
-    删除连续高高或者低低点中的较低高点和较高低点,相等的情况，删除后面的点
-    :param higher: pd.Series, columns=[high], index is datetime
-    :param lower:  pd.Series, columns=[low], index is datetime
-    :return: [pd.Series, pd.Series]
+    对同一个k线的极值点进行排序
+    :param peak_df:
+    :param invert: default True, 按 high， high和low， low排列
+    :return: pd.DataFrame columns=[high, kindex, type]
     """
-    hl_df = pd.concat([higher.high, lower.low], axis=1, join='outer')
-    # 比较前后高低点
-    df1 = hl_df.diff()
-    df2 = hl_df.diff(-1)
+    # 检测输入类型
+    assert isinstance(peak_df, pd.DataFrame)
 
-    index = [df1['high'] <= 0, df2['high'] < 0, df1['low'] >= 0, df2['low'] > 0]
-    flag = [x.any() for x in index]
+    df = peak_df.copy()  # 不对输入数据进行操作，有可能改变原始数据
+    df['sn'] = range(len(df))
 
-    if not (flag[0] or flag[1] or flag[2] or flag[3]):
-        return [higher, lower]
+    # TODO 不存在同一个k线上有极值点的处理
+    for row in df[df.index.duplicated()].itertuples():
+        try:
+            if df.type[row.sn] != df.type[row.sn + 1] and invert:
+                df.iloc[row.sn], df.iloc[row.sn-1] = df.iloc[row.sn-1], df.iloc[row.sn]
+        except IndexError:
+            log.info('最后一根k线上有极值点')
 
-    if flag[0]:
-        hl_df.loc[index[0], 'high'] = np.nan  # 向后删除较低高点
-    if flag[1]:
-        hl_df.loc[index[1], 'high'] = np.nan  # 向前删除较低高点
-    if flag[2]:
-        hl_df.loc[index[2], 'low'] = np.nan
-    if flag[3]:
-        hl_df.loc[index[3], 'low'] = np.nan
-    if flag[0] or flag[1]:
-        higher = hl_df['high'].dropna()
-    if flag[2] or flag[3]:
-        lower = hl_df['low'].dropna()
-
-    return remove_continued_extremes(higher, lower)
+    # df.to_excel('one.xlsx')
+    del df['sn']
+    return df
 
 
-def remove_fake_extreme(higher, lower):
+def remove_fake_peaks(hl_df):
     """
     删除比相邻极点高的低点和比相邻极点低的高点，包括了高点/低点连续出现的情况
-    :param higher: pd.DataFrame, columns=[high, kindex], index is datetime
-    :param lower:  pd.DataFrame, columns=[low, kindex], index is datetime
-    :return: [pd.Series, pd.Series]
+    :param hl_df: pd.DataFame, columns=[peak, kindex, type]
+    :return: pd.DataFame, columns=[peak, kindex, type]
     """
 
     # 检测输入类型
-    assert isinstance(higher, pd.DataFrame)
-    assert isinstance(higher, pd.DataFrame)
+    assert isinstance(hl_df, pd.DataFrame)
 
-    # 将极值点拼接为一个DataFrame
-    high_df = higher.rename(columns={'high': 'extreme'})
-    high_df['hl_flag'] = 'high'
+    df = hl_df.copy()  # 不对输入数据进行操作，有可能改变原始数据
+    # df['sn'] = range(len(df))
 
-    # low_df = lower.low.to_frame('extreme')
-    low_df = lower.rename(columns={'low': 'extreme'})
-    low_df['hl_flag'] = 'low'
-
-    hl_df = high_df.append(low_df).sort_index()
-    hl_df['sn'] = range(len(hl_df))
-
-    # TODO 对在同一根k线上的极值点进行处理，转换为高高相邻和低低相邻
-    # 较近的k线可以使用同样的处理方式
-
-    hl_diff_left = hl_df.extreme.diff()
-    hl_diff_right = hl_df.extreme.diff(-1)
+    diff_left = df.peak.diff()
+    diff_right = df.peak.diff(-1)
 
     # 和前一个极值点点比较，没有比较的情况假设是合理的极值点
-    hl_diff_left[0] = -1 if hl_df.hl_flag[0] == 'low' else 1
-    hl_diff_right[-1] = -1 if hl_df.hl_flag[-1] == 'low' else 1
+    diff_left[0] = -1 if df.type[0] == 'low' else 1
+    diff_right[-1] = -1 if df.type[-1] == 'low' else 1
+
+    h_flag = np.logical_and(np.logical_and(diff_left >= 0, diff_right > 0),
+                            df.type == 'high')
+    r_flag = np.logical_and(np.logical_and(diff_left <= 0, diff_right < 0),
+                            df.type == 'low')
 
     # # 相等的情况保留后一个点
-    flag = np.logical_or(hl_diff_left * hl_diff_right > 0,
-                         hl_diff_left == 0)
-    handled_df = hl_df[flag.values]
-    # # 相等的情况保留后一个点
-    # # TODO 高低点在一根k线上,会使数据增多
-    # l_left_flag = hl_diff_left.loc[hl_df['hl_flag'] == 'low'] <= 0
-    # h_left_flag = hl_diff_left.loc[hl_df['hl_flag'] == 'high'] >= 0
-    # l_right_flag = hl_diff_right.loc[hl_df['hl_flag'] == 'low'] < 0
-    # h_right_flag = hl_diff_right.loc[hl_df['hl_flag'] == 'high'] > 0
-    #
-    # h_flag = np.logical_and(h_left_flag, h_right_flag)
-    # l_flag = np.logical_and(l_left_flag, l_right_flag)
-    #
-    # # TODO 高低点在一根k线上，是否不需要递归处理
-    # handled_higher = higher[h_flag.values]
-    # handled_lower = lower[l_flag.values]
+    flag = np.logical_or(h_flag, r_flag)
 
-    return handled_df[handled_df['hl_flag'] == 'high'], \
-           handled_df[handled_df['hl_flag'] == 'low']
+    df = df[flag.values]
+    df.to_excel('fake.xlsx')
+
+    return df
 
 
-def get_kline_segments(higher, lower):
+def get_kline_segments(peak_df):
     """
-    identify the segments from high/low extremes
-    :param higher: pd.DataFame/Series, columns=[high, [kindex]], index is datetime
-    :param lower:  pd.DataFame/Series, columns=[low, [kindex]], index is datetime
-    :return: [pd.Series, pd.Series] segment的kline_no.可以在基础extreme里查询
+    identify the segments from peaks
+    :param peak_df:
+    :return: [pd.Series, pd.Series] segment的kline_no.可以在基础peak里查询
     """
 
     # 删除连续高高或者低低点中的较低高点和较高低点,相等的情况，删除后面的点
-    temp_higher, temp_lower = remove_fake_extreme(higher, lower)
+    df = sort_one_candle_peaks(peak_df)
+    segment_df = remove_fake_peaks(df)
 
-    # temp_higher, temp_lower = remove_fake_extreme(temp_higher, temp_lower)
+    # TODO 对两个处理只进行一次，是否还需要进行循环或者递归处理
+    segment_df.to_excel('segment_all.xlsx')
+
 
     # TODO   极值点离得较近的情况
 
     # if isinstance(higher, pd.DataFrame):
     #     hl_df = pd.merge(higher, lower, left_index=True, right_index=True, how='outer', on=['kindex'])
-    return temp_higher, temp_lower
+    return segment_df
 
 
-def get_kline_extremes(high, low):
+def get_kline_peaks(hl_df):
     """
-    calculate the extremes value of high and low
-    :param high: pd.DataFame, columns=[high, kindex], index is datetime
-    :param low:  pd.DataFame, columns=[low, kindex], index is datetime
-    :return: [pd.DataFame, pd.DataFame], columns=[high/low, kindex]
+    only calculate the peaks of kline value of high and low
+    :param hl_df: pd.DataFame, columns=['high', 'low', 'kindex']
+    :return: pd.DataFame, columns=[peak, kindex, type]
+        peak        high,low的极值点
+        kindex      k线的序列号
+        type        'high' or 'low'
     """
-    higher = high.iloc[signal.argrelextrema(high.high.values, np.greater)]
-    lower = low.iloc[signal.argrelextrema(-low.low.values, np.greater)]
 
-    return [higher, lower]
+    high_df = hl_df.rename(columns={'high': 'peak'})
+    del high_df['low']
+    high_df['type'] = 'high'
+
+    # low_df = lower.low.to_frame('peak')
+    low_df = hl_df.rename(columns={'low': 'peak'})
+    del low_df['high']
+    low_df['type'] = 'low'
+
+    high_df = high_df.iloc[signal.argrelextrema(high_df.peak.values, np.greater)]
+    low_df = low_df.iloc[signal.argrelextrema(-low_df.peak.values, np.greater)]
+
+    peak_df = high_df.append(low_df).sort_index()
+
+    # peak_df.to_excel('peak_all.xlsx')
+
+    return peak_df
 
 
 def get_history_hq(code, start=None, end=None, freq='d'):
@@ -407,13 +395,16 @@ if __name__ == "__main__":
 
     # from src.features.block import TsBlock
 
-    today = datetime.today()
-    observation = 250
-    start = today - timedelta(observation)
+    start = datetime(2018, 6, 29)
+    end = datetime(2019, 3, 1)
+    # observation = 250
+    # start = today - timedelta(observation)
     # end = today - timedelta(7)
 
     block = TsBlock("ML8")
-    segment = block.get_segments(start=start)
+    # peak = block.get_peaks(start=start, end=end)
+    # segment = block.get_segments(start=start)
+    segment = block.get_segments()
     # df = pd.concat(segment, axis=1, join='outer').fillna(0)
     # block_df = block.get_blocks()
 
