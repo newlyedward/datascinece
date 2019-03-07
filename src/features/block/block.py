@@ -44,11 +44,11 @@ class TsBlock:
             if freq in ('5m', 'd'):
                 temp_df = get_history_hq(self.code, start=start, end=end, freq=freq)
                 hq_df = temp_df[['high', 'low', 'kindex']]
+                temp_peak = get_peaks_from_hq(hq_df)
             else:
                 index = FREQ.index(freq) - 1
-                hq_df = self.get_segments(start=start, end=end, freq=FREQ[index])
-
-            temp_peak = get_kline_peaks(hq_df)
+                peak_df = self.get_segments(start=start, end=end, freq=FREQ[index])
+                temp_peak = get_peaks_from_segments(peak_df)
             self.__peaks[freq] = temp_peak
             return temp_peak
         elif start and end:
@@ -72,7 +72,7 @@ class TsBlock:
 
         if segment_df.empty:
             peak_df = self.get_peaks(start=start, end=end, freq=freq)
-            segment_df = get_kline_segments(peak_df)
+            segment_df = get_segments(peak_df)
             self.__segments[freq] = segment_df
             return segment_df
         else:
@@ -84,8 +84,6 @@ class TsBlock:
                 return segment_df[:end]
             else:
                 return segment_df
-
-
 
     def get_blocks(self, start=None, end=None, freq='d'):
         """
@@ -259,15 +257,16 @@ def identify_blocks(higher, lower):
     block_df = block_df.append(insert_row, ignore_index=True)
     return block_df.set_index('start_dt')
 
+
 # TODO 增加对 删除连续高低点；删除低点比高点高的段；删除高低点较近的段 的测试用例
 
 
 def sort_one_candle_peaks(peak_df, invert=True):
     """
     对同一个k线的极值点进行排序
-    :param peak_df:
+    :param peak_df: pd.DataFrame columns=[peak, kindex, type]
     :param invert: default True, 按 high， high和low， low排列
-    :return: pd.DataFrame columns=[high, kindex, type]
+    :return: pd.DataFrame columns=[high, peak, type]
     """
     # 检测输入类型
     assert isinstance(peak_df, pd.DataFrame)
@@ -279,7 +278,7 @@ def sort_one_candle_peaks(peak_df, invert=True):
     for row in df[df.index.duplicated()].itertuples():
         try:
             if df.type[row.sn] != df.type[row.sn + 1] and invert:
-                df.iloc[row.sn], df.iloc[row.sn-1] = df.iloc[row.sn-1], df.iloc[row.sn]
+                df.iloc[row.sn], df.iloc[row.sn - 1] = df.iloc[row.sn - 1], df.iloc[row.sn]
         except IndexError:
             log.info('最后一根k线上有极值点')
 
@@ -288,87 +287,142 @@ def sort_one_candle_peaks(peak_df, invert=True):
     return df
 
 
-def remove_fake_peaks(hl_df):
+def remove_fake_peaks(peak_df):
     """
     删除比相邻极点高的低点和比相邻极点低的高点，包括了高点/低点连续出现的情况
-    :param hl_df: pd.DataFame, columns=[peak, kindex, type]
+    :param peak_df: pd.DataFame, columns=[peak, kindex, type]
     :return: pd.DataFame, columns=[peak, kindex, type]
     """
 
     # 检测输入类型
-    assert isinstance(hl_df, pd.DataFrame)
+    assert isinstance(peak_df, pd.DataFrame)
 
-    df = hl_df.copy()  # 不对输入数据进行操作，有可能改变原始数据
+    df = peak_df.copy()  # 不对输入数据进行操作，有可能改变原始数据
     # df['sn'] = range(len(df))
+    len_before = len(df)
+    len_after = len_before - 1
 
-    diff_left = df.peak.diff()
-    diff_right = df.peak.diff(-1)
+    while len_after < len_before:
+        print(len_after)
 
-    # 和前一个极值点点比较，没有比较的情况假设是合理的极值点
-    diff_left[0] = -1 if df.type[0] == 'low' else 1
-    diff_right[-1] = -1 if df.type[-1] == 'low' else 1
+        diff_left = df.peak.diff()
+        diff_right = df.peak.diff(-1)
 
-    h_flag = np.logical_and(np.logical_and(diff_left >= 0, diff_right > 0),
-                            df.type == 'high')
-    r_flag = np.logical_and(np.logical_and(diff_left <= 0, diff_right < 0),
-                            df.type == 'low')
+        # 和前一个极值点点比较，没有比较的情况假设是合理的极值点
+        diff_left[0] = -1 if df.type[0] == 'low' else 1
+        diff_right[-1] = -1 if df.type[-1] == 'low' else 1
 
-    # # 相等的情况保留后一个点
-    flag = np.logical_or(h_flag, r_flag)
+        h_flag = np.logical_and(np.logical_and(diff_left >= 0, diff_right > 0),
+                                df.type == 'high')
+        r_flag = np.logical_and(np.logical_and(diff_left <= 0, diff_right < 0),
+                                df.type == 'low')
 
-    df = df[flag.values]
-    df.to_excel('fake.xlsx')
+        # # 相等的情况保留后一个点
+        flag = np.logical_or(h_flag, r_flag)
+
+        df = df[flag.values]
+
+        len_before = len_after
+        len_after = len(df)
+
+    # df.to_excel('fake_.xlsx')
 
     return df
 
 
-def get_kline_segments(peak_df):
+def get_segments(peak_df):
     """
     identify the segments from peaks
-    :param peak_df:
-    :return: [pd.Series, pd.Series] segment的kline_no.可以在基础peak里查询
+    :param peak_df: pd.DataFame, columns=[peak, kindex, type]
+    :return: pd.DataFame, columns=[peak, kindex, type]
     """
+    df = peak_df.copy()
 
-    # 删除连续高高或者低低点中的较低高点和较高低点,相等的情况，删除后面的点
-    df = sort_one_candle_peaks(peak_df)
-    segment_df = remove_fake_peaks(df)
+    # len_before = len(df)
+    # len_after = len_before - 1
+    # # 删除连续高高或者低低点中的较低高点和较高低点,相等的情况，删除后面的点
+    # while len_after < len_before:
+    #     print(len_after)
+    #     df = remove_fake_peaks(df)
+    #     len_before = len_after
+    #     len_after = len(df)
 
-    # TODO 对两个处理只进行一次，是否还需要进行循环或者递归处理
-    segment_df.to_excel('segment_all.xlsx')
+    df = remove_fake_peaks(df)
+    df = sort_one_candle_peaks(df)
+    df = remove_fake_peaks(df)
+
+    df.to_excel('segment_ww.xlsx')
+    # TODO 极值点离得较近的情况
+
+    return df
 
 
-    # TODO   极值点离得较近的情况
-
-    # if isinstance(higher, pd.DataFrame):
-    #     hl_df = pd.merge(higher, lower, left_index=True, right_index=True, how='outer', on=['kindex'])
-    return segment_df
-
-
-def get_kline_peaks(hl_df):
+def get_peaks_from_segments(segment_df):
     """
     only calculate the peaks of kline value of high and low
-    :param hl_df: pd.DataFame, columns=['high', 'low', 'kindex']
+    :param segment_df: pd.DataFame,
+            columns=['peak', 'kindex', 'type']
     :return: pd.DataFame, columns=[peak, kindex, type]
         peak        high,low的极值点
         kindex      k线的序列号
         type        'high' or 'low'
     """
 
-    high_df = hl_df.rename(columns={'high': 'peak'})
+    high_df = segment_df[segment_df['type'] == 'high']
+    low_df = segment_df[segment_df['type'] == 'low']
+
+    # 值相等的极值点全部保留
+    high_df = high_df.iloc[signal.argrelextrema(high_df.peak.values, np.greater_equal)]
+    low_df = low_df.iloc[signal.argrelextrema(-low_df.peak.values, np.greater_equal)]
+
+    peak_df = high_df.append(low_df).sort_index()
+
+    # 添加被错误删除的点，即两个端点之间还有更高的高点和更低的低点
+    x = peak_df.reindex(segment_df.index, method='bfill')
+    y = peak_df.reindex(segment_df.index, method='ffill')
+
+    # TODO bpeak不可以，下面单独出来独立为函数
+    bpeak = x.type == segment_df.type
+    b_compare = x.peak - segment_df.peak
+    f_compare = y.peak - segment_df.peak
+    b1 = np.logical_and(b_compare > 0, x.type == 'low')
+    b2 = np.logical_and(b_compare < 0, x.type == 'high')
+    b3 = np.logical_and(f_compare > 0, y.type == 'low')
+    b4 = np.logical_and(f_compare < 0, y.type == 'high')
+    bflag = np.logical_and(bpeak, np.logical_or(np.logical_or(b1, b2),
+                                               np.logical_or(b3, b4)))
+
+    # peak_df.to_excel('peak_ww.xlsx')
+
+    return peak_df
+
+
+def get_peaks_from_hq(hq_df):
+    """
+    only calculate the peaks of kline value of high and low
+    :param hq_df: pd.DataFame,
+            columns=['high', 'low', 'kindex']
+    :return: pd.DataFame, columns=[peak, kindex, type]
+        peak        high,low的极值点
+        kindex      k线的序列号
+        type        'high' or 'low'
+    """
+    high_df = hq_df.rename(columns={'high': 'peak'})
     del high_df['low']
     high_df['type'] = 'high'
 
     # low_df = lower.low.to_frame('peak')
-    low_df = hl_df.rename(columns={'low': 'peak'})
+    low_df = hq_df.rename(columns={'low': 'peak'})
     del low_df['high']
     low_df['type'] = 'low'
 
-    high_df = high_df.iloc[signal.argrelextrema(high_df.peak.values, np.greater)]
-    low_df = low_df.iloc[signal.argrelextrema(-low_df.peak.values, np.greater)]
+    # 值相等的极值点全部保留
+    high_df = high_df.iloc[signal.argrelextrema(high_df.peak.values, np.greater_equal)]
+    low_df = low_df.iloc[signal.argrelextrema(-low_df.peak.values, np.greater_equal)]
 
     peak_df = high_df.append(low_df).sort_index()
 
-    # peak_df.to_excel('peak_all.xlsx')
+    # peak_df.to_excel('peak_ww.xlsx')
 
     return peak_df
 
@@ -404,7 +458,7 @@ if __name__ == "__main__":
     block = TsBlock("ML8")
     # peak = block.get_peaks(start=start, end=end)
     # segment = block.get_segments(start=start)
-    segment = block.get_segments()
+    segment = block.get_segments(freq='w')
     # df = pd.concat(segment, axis=1, join='outer').fillna(0)
     # block_df = block.get_blocks()
 

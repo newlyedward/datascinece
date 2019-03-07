@@ -13,6 +13,9 @@ py.init_notebook_mode()  # graphs charts inline (IPython).
 
 # Module IMports
 from notebooks.jupyter_lib.lib_loader import *
+from IPython.core.interactiveshell import InteractiveShell
+
+InteractiveShell.ast_node_interactivity = "all"
 
 # Custom Import
 from pathlib import Path

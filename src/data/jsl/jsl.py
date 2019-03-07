@@ -68,7 +68,7 @@ def get_stocks_detail(stocks_id=None):
     if isinstance(stocks_id, pd.DataFrame):
         stocks_id = stocks_id['stock_id'].tolist()
 
-    # 文件存在并且不是交易时间，还需要判断文件足够新才行
+    # TODO 文件存在并且不是交易时间，还需要判断文件足够新才行
     if file_path.exists() and is_not_trading():
         df = pd.read_csv(file_name, encoding='gb2312')
         # 根据stocks code 返回需要的数据
