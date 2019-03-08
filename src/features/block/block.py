@@ -72,8 +72,9 @@ class TsBlock:
 
         if segment_df.empty:
             peak_df = self.get_peaks(start=start, end=end, freq=freq)
-            segment_df = get_segments(peak_df)
+            segment_df = get_segments_from_peaks(peak_df)
             self.__segments[freq] = segment_df
+            segment_df.to_excel("segment_"+freq+".xlsx")
             return segment_df
         else:
             if start and end:
@@ -282,7 +283,6 @@ def sort_one_candle_peaks(peak_df, invert=True):
         except IndexError:
             log.info('最后一根k线上有极值点')
 
-    # df.to_excel('one.xlsx')
     del df['sn']
     return df
 
@@ -300,11 +300,9 @@ def remove_fake_peaks(peak_df):
     df = peak_df.copy()  # 不对输入数据进行操作，有可能改变原始数据
     # df['sn'] = range(len(df))
     len_before = len(df)
-    len_after = len_before - 1
+    len_after = len_before - 1  # 为了循环能执行至少一次
 
     while len_after < len_before:
-        print(len_after)
-
         diff_left = df.peak.diff()
         diff_right = df.peak.diff(-1)
 
@@ -325,12 +323,10 @@ def remove_fake_peaks(peak_df):
         len_before = len_after
         len_after = len(df)
 
-    # df.to_excel('fake_.xlsx')
-
     return df
 
 
-def get_segments(peak_df):
+def get_segments_from_peaks(peak_df):
     """
     identify the segments from peaks
     :param peak_df: pd.DataFame, columns=[peak, kindex, type]
@@ -338,20 +334,11 @@ def get_segments(peak_df):
     """
     df = peak_df.copy()
 
-    # len_before = len(df)
-    # len_after = len_before - 1
-    # # 删除连续高高或者低低点中的较低高点和较高低点,相等的情况，删除后面的点
-    # while len_after < len_before:
-    #     print(len_after)
-    #     df = remove_fake_peaks(df)
-    #     len_before = len_after
-    #     len_after = len(df)
-
     df = remove_fake_peaks(df)
     df = sort_one_candle_peaks(df)
     df = remove_fake_peaks(df)
 
-    df.to_excel('segment_ww.xlsx')
+    # df.to_excel('segment_ww.xlsx')
     # TODO 极值点离得较近的情况
 
     return df
@@ -381,20 +368,16 @@ def get_peaks_from_segments(segment_df):
     x = peak_df.reindex(segment_df.index, method='bfill')
     y = peak_df.reindex(segment_df.index, method='ffill')
 
-    # TODO bpeak不可以，下面单独出来独立为函数
-    bpeak = x.type == segment_df.type
+    # 修正端点不是极值点的错误
     b_compare = x.peak - segment_df.peak
     f_compare = y.peak - segment_df.peak
-    b1 = np.logical_and(b_compare > 0, x.type == 'low')
-    b2 = np.logical_and(b_compare < 0, x.type == 'high')
-    b3 = np.logical_and(f_compare > 0, y.type == 'low')
-    b4 = np.logical_and(f_compare < 0, y.type == 'high')
-    bflag = np.logical_and(bpeak, np.logical_or(np.logical_or(b1, b2),
-                                               np.logical_or(b3, b4)))
+    b1 = np.logical_and(np.logical_and(b_compare > 0, x.type == 'low'), segment_df.type == 'low')
+    b2 = np.logical_and(np.logical_and(b_compare < 0, x.type == 'high'), segment_df.type == 'high')
+    b3 = np.logical_and(np.logical_and(f_compare > 0, y.type == 'low'), segment_df.type == 'low')
+    b4 = np.logical_and(np.logical_and(f_compare < 0, y.type == 'high'), segment_df.type == 'high')
+    bflag = np.logical_or(np.logical_or(b1, b2), np.logical_or(b3, b4))
 
-    # peak_df.to_excel('peak_ww.xlsx')
-
-    return peak_df
+    return peak_df.append(segment_df[bflag]).sort_index()
 
 
 def get_peaks_from_hq(hq_df):
