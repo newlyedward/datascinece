@@ -18,13 +18,13 @@ from IPython.core.interactiveshell import InteractiveShell
 InteractiveShell.ast_node_interactivity = "all"
 
 # Custom Import
-from pathlib import Path
-homedir = Path(Path.cwd()).parent
-raw_data_dir = homedir / 'data/raw'
-reports_dir = homedir / 'reports'
-
-import sys
-sys.path.append(str(homedir))
+# from pathlib import Path
+# homedir = Path(Path.cwd()).parent
+# raw_data_dir = homedir / 'data/raw'
+# reports_dir = homedir / 'reports'
+#
+# import sys
+# sys.path.append(str(homedir))
 
 from src.data.tdx import get_future_hq
 from src.features.block import TsBlock

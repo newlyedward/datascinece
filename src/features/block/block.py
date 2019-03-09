@@ -74,7 +74,7 @@ class TsBlock:
             peak_df = self.get_peaks(start=start, end=end, freq=freq)
             segment_df = get_segments_from_peaks(peak_df)
             self.__segments[freq] = segment_df
-            segment_df.to_excel("segment_"+freq+".xlsx")
+            segment_df.to_excel("segment_" + freq + ".xlsx")
             return segment_df
         else:
             if start and end:
@@ -99,8 +99,8 @@ class TsBlock:
         temp_block = self.__blocks[freq]
 
         if temp_block.empty:
-            higher, lower = self.get_segments(start=start, end=end, freq=freq)
-            temp_block = identify_blocks(higher, lower)
+            segment_df = self.get_segments(start=start, end=end, freq=freq)
+            temp_block = identify_blocks(segment_df)
             temp_block = identify_blocks_relation(temp_block)
             self.__blocks[freq] = temp_block
             return temp_block
@@ -116,57 +116,67 @@ class TsBlock:
                 return temp_block
 
     def get_current_status(self, start=None, end=None, freq='d'):
-        temp_block_df = self.get_blocks(start=None, end=None, freq=freq)
-        dt = temp_block_df.loc[temp_block_df['No.'] == 0, ['block_flag', 'No.', 'segment_num', 'block_type']].tail(
-            2).index[0]
-        return temp_block_df.loc[dt:]
+        temp_block_df = self.get_blocks(start=start, end=start, freq=freq)
+        try:
+            dt = temp_block_df.loc[temp_block_df['No.'] == 0].tail(2).index[0]
+            return temp_block_df.loc[dt:]
+        except IndexError:
+            return temp_block_df
 
 
-def identify_blocks_relation(block_df):
-    block_relation_df = block_df[block_df['segment_num'] > 3].diff()[1:]
-    temp_df = block_df.copy(deep=True)
-    temp_df['block_flag'] = '-'
-    temp_df['block_type'] = '-'
-    temp_df['No.'] = '_'
-    # temp_df['No_include_3'] = '_'
-    # temp_df['top_bottom_flag'] = '-'
+def identify_blocks_relation(df: pd.DataFrame):
+    """
+
+    :type df: pd.DataFrame
+    :param df: pd.DataFrame(columns=['enter_dt', 'start_dt', 'end_dt', 'left_dt', 'block_high', 'block_low',
+                               'block_highest', 'block_lowest', 'segment_num'])
+    :return: pd.DataFrame(columns=['enter_dt', 'start_dt', 'end_dt', 'left_dt', 'block_high', 'block_low',
+                               'block_highest', 'block_lowest', 'segment_num', 'block_type', 'block_type', 'No.'])
+        block_type: up, down
+        block_relation: up, down, include, included
+        No. 对趋势中的block进行计数，只有三段的不计数
+    """
+    block_relation_df = df[df['segment_num'] > 3].diff()[1:]
+    temp_df = df.copy(deep=True)
+    temp_df['block_type'] = np.nan
+    temp_df['block_relation'] = np.nan
+    temp_df['No.'] = np.nan
 
     block_index = 0
-    # block_index_incl3 = 0
 
+    block_type = block_relation = np.nan
     for row in block_relation_df.itertuples():
         current_dt = row.Index
-        # prev_index = block_relation_df.index.get_loc(current_dt) - 1
 
-        if row.block_high > 0 and row.block_low > 0:
-            block_flag = 'up'
-        elif row.block_high < 0 and row.block_low < 0:
-            block_flag = 'down'
-        elif row.block_high > 0 > row.block_low:
-            block_flag = 'include'
-        elif row.block_high < 0 < row.block_low:
-            block_flag = 'included'
-
-        if row.block_highest > 0 and row.block_lowest > 0:
+        if row.block_high >= 0 and row.block_low >= 0:
             block_type = 'up'
-        elif row.block_highest < 0 and row.block_lowest < 0:
+        elif row.block_high <= 0 and row.block_low <= 0:
             block_type = 'down'
-        elif row.block_highest > 0 > row.block_lowest:
+        elif row.block_high >= 0 >= row.block_low:
             block_type = 'include'
-        elif row.block_highest < 0 < row.block_lowest:
+        elif row.block_high <= 0 <= row.block_low:
             block_type = 'included'
 
-        temp_df.loc[current_dt, 'block_flag'] = block_flag
+        if row.block_highest >= 0 and row.block_lowest >= 0:
+            block_relation = 'up'
+        elif row.block_highest <= 0 and row.block_lowest <= 0:
+            block_relation = 'down'
+        elif row.block_highest >= 0 >= row.block_lowest:
+            block_relation = 'include'
+        elif row.block_highest <= 0 <= row.block_lowest:
+            block_relation = 'included'
+
         temp_df.loc[current_dt, 'block_type'] = block_type
+        temp_df.loc[current_dt, 'block_relation'] = block_relation
 
         block_index = block_index + 1
 
         # 最后一个block不能确认是top或者bottom,segment_num < 4的情况要计算在内
-        if temp_df.segment_num[current_dt] % 2 == 0 and current_dt != block_df.index[-1]:
-            if block_flag == 'up':
-                temp_df.loc[current_dt, 'block_flag'] = 'top'
-            elif block_flag == 'down':
-                temp_df.loc[current_dt, 'block_flag'] = 'bottom'
+        if temp_df.segment_num[current_dt] % 2 == 0 and current_dt != df.index[-1]:
+            # if block_type == 'up':
+            #     temp_df.loc[current_dt, 'block_type'] = 'top'
+            # elif block_type == 'down':
+            #     temp_df.loc[current_dt, 'block_type'] = 'bottom'
             block_index = 0
 
         temp_df.loc[current_dt, 'No.'] = block_index
@@ -174,89 +184,87 @@ def identify_blocks_relation(block_df):
     return temp_df
 
 
-def identify_blocks(higher, lower):
-    # 后向寻找Block
-    gd_df = pd.concat([higher, lower], axis=1, join='outer')
-    hl_df = gd_df.fillna(0)
-
+def identify_blocks(segment_df: pd.DataFrame):
+    """
+    identify blocks
+    :param segment_df: pd.DataFame, columns=[peak, kindex, type]
+    :return: pd.DataFrame(columns=['enter_dt', 'start_dt', 'end_dt', 'left_dt', 'block_high', 'block_low',
+                               'block_highest', 'block_lowest', 'segment_num'])
+            enter_dt:
+            start_dt:
+            end_dt:
+            left_dt:
+            block_high:
+            block_low:
+            block_highest:
+            block_lowest:
+            segment_num:
+    """
     # init current block
-    block_high = higher[0]
-    block_low = lower[0]
-    start_dt = hl_df.index[0]
-    end_dt = hl_df.index[1]
-    segment_num = 1
-    current_dt = start_dt
+    block_high = block_highest = current_high = current_highest = segment_df.peak[1:3].max()
+    block_low = block_lowest = current_low = current_lowest = segment_df.peak[1:3].min()
+
+    enter_dt = segment_df.index[0]
+    start_dt = segment_df.index[1]
+    end_dt = left_dt = segment_df.index[2]
+    segment_num = 2
+
     # 初始化block表
-    block_df = pd.DataFrame(
-        columns=['start_dt', 'end_dt', 'block_high', 'block_low', 'block_highest', 'block_lowest',
-                 'segment_num'])
+    columns = ['enter_dt', 'start_dt', 'end_dt', 'left_dt', 'block_high', 'block_low',
+               'block_highest', 'block_lowest', 'segment_num']
+    df = pd.DataFrame(columns=columns)
 
-    for row in hl_df[2:].itertuples():
-        # print(row.Index)
-        # print([current_dt, start_dt, end_dt, block_high,block_low,block_highest, block_lowest,segment_num])
-        if segment_num < 2:  # 一上一下2根线段必定有交集,不需要判断是否是新的block
-            current_dt = row.Index
-            segment_num = segment_num + 1
-            if row.high > row.low:  # 顶
-                block_high = min(block_high, row.high)
+    for row in segment_df[3:].itertuples():
+        current_dt = row.Index
+        if row.type == 'high':  # 顶
+            if row.peak < block_low:  # 第三类卖点，新的中枢开始
+                insert_row = pd.DataFrame([[enter_dt, start_dt, end_dt, left_dt, block_high, block_low,
+                                            block_highest, block_lowest, segment_num]], columns=columns)
+                df = df.append(insert_row, ignore_index=True)
+
+                enter_dt = end_dt
+                start_dt = left_dt
+                end_dt = left_dt = current_dt
+                segment_num = 2
+                block_high = block_highest = current_high = current_highest = row.peak
+                block_low = block_lowest = current_low = current_lowest = segment_df.loc[start_dt, 'peak'].min() \
+                    if isinstance(segment_df.loc[start_dt, 'peak'], pd.Series) else segment_df.loc[start_dt, 'peak']
             else:
-                block_low = max(block_low, row.low)
+                segment_num = segment_num + 1
+                block_high = current_high
+                current_high = min(block_high, row.peak)
+                block_highest = current_highest
+                current_highest = max(block_highest, row.peak)
+                end_dt = left_dt
+                left_dt = current_dt
         else:
-            if row.high > row.low:  # 顶
-                if row.high < block_low:  # 第三类卖点，新的中枢开始
-                    start_index = gd_df.index.get_loc(start_dt) + 1
-                    end_index = gd_df.index.get_loc(current_dt)
-                    block_highest = gd_df.high[start_index: end_index].max()
-                    block_lowest = gd_df.low[start_index: end_index].min()
+            if row.peak > block_high:  # 第三类买点，新的中枢开始
+                insert_row = pd.DataFrame([[enter_dt, start_dt, end_dt, left_dt, block_high, block_low,
+                                            block_highest, block_lowest, segment_num]], columns=columns)
+                df = df.append(insert_row, ignore_index=True)
 
-                    insert_row = pd.DataFrame([[start_dt, current_dt, block_high, block_low, block_highest,
-                                                block_lowest, segment_num]],
-                                              columns=['start_dt', 'end_dt', 'block_high', 'block_low',
-                                                       'block_highest', 'block_lowest', 'segment_num'])
-                    block_df = block_df.append(insert_row, ignore_index=True)
-
-                    start_dt = end_dt
-                    segment_num = 2
-                    block_high = row.high
-                    block_low = lower[current_dt]
-                else:
-                    segment_num = segment_num + 1
-                    block_high = min(block_high, row.high)
+                enter_dt = end_dt
+                start_dt = left_dt
+                end_dt = left_dt = current_dt
+                segment_num = 2
+                block_high = block_highest = current_high = current_highest = segment_df.loc[start_dt, 'peak'].max() \
+                    if isinstance(segment_df.loc[start_dt, 'peak'], pd.Series) else segment_df.loc[start_dt, 'peak']
+                block_low = block_lowest = current_low = current_lowest = row.peak
             else:
-                if row.low > block_high:  # 第三类买点，新的中枢开始
-                    start_index = gd_df.index.get_loc(start_dt) + 1
-                    end_index = gd_df.index.get_loc(current_dt)
-                    block_highest = gd_df.high[start_index: end_index].max()
-                    block_lowest = gd_df.low[start_index: end_index].min()
+                segment_num = segment_num + 1
+                block_low = current_low
+                current_low = max(block_low, row.peak)
+                block_lowest = current_lowest
+                current_lowest = min(block_lowest, row.peak)
 
-                    insert_row = pd.DataFrame([[start_dt, current_dt, block_high, block_low, block_highest,
-                                                block_lowest, segment_num]],
-                                              columns=['start_dt', 'end_dt', 'block_high', 'block_low',
-                                                       'block_highest', 'block_lowest', 'segment_num'])
-                    block_df = block_df.append(insert_row, ignore_index=True)
-
-                    start_dt = end_dt
-                    segment_num = 2
-                    block_low = row.low
-                    block_high = higher[current_dt]
-                else:
-                    segment_num = segment_num + 1
-                    block_low = max(block_low, row.low)
-            end_dt = current_dt
-            current_dt = row.Index
+                end_dt = left_dt
+                left_dt = current_dt
 
     # record last block
-    start_index = gd_df.index.get_loc(start_dt) + 1
-    end_index = gd_df.index.get_loc(current_dt)
-    block_highest = gd_df.high[start_index: end_index].max()
-    block_lowest = gd_df.low[start_index: end_index].min()
-
-    insert_row = pd.DataFrame([[start_dt, current_dt, block_high, block_low, block_highest,
-                                block_lowest, segment_num]],
-                              columns=['start_dt', 'end_dt', 'block_high', 'block_low',
-                                       'block_highest', 'block_lowest', 'segment_num'])
-    block_df = block_df.append(insert_row, ignore_index=True)
-    return block_df.set_index('start_dt')
+    insert_row = pd.DataFrame([[enter_dt, start_dt, end_dt, left_dt, block_high, block_low, block_highest,
+                                block_lowest, segment_num]], columns=columns)
+    df = df.append(insert_row, ignore_index=True)
+    return df.set_index('enter_dt')
 
 
 # TODO 增加对 删除连续高低点；删除低点比高点高的段；删除高低点较近的段 的测试用例
@@ -441,9 +449,13 @@ if __name__ == "__main__":
     block = TsBlock("ML8")
     # peak = block.get_peaks(start=start, end=end)
     # segment = block.get_segments(start=start)
-    segment = block.get_segments(freq='w')
-    # df = pd.concat(segment, axis=1, join='outer').fillna(0)
+    # segment = block.get_segments(freq='w')
     # block_df = block.get_blocks()
+
+    block_w = block.get_current_status(freq='w')
+    # block_d = block.get_current_status(start=start)
+    # segment_w = block.get_segments(start=start, freq='w')
+    # segment_d = block.get_segments(start=start)
 
     # TODO external api 如何使用
     # ml8 2018 9-10month  发现错误的段，低点比高点高·······························
