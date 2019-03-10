@@ -127,52 +127,69 @@ class TsBlock:
 def identify_blocks_relation(df: pd.DataFrame):
     """
 
-    :type df: pd.DataFrame
     :param df: pd.DataFrame(columns=['enter_dt', 'start_dt', 'end_dt', 'left_dt', 'block_high', 'block_low',
                                'block_highest', 'block_lowest', 'segment_num'])
     :return: pd.DataFrame(columns=['enter_dt', 'start_dt', 'end_dt', 'left_dt', 'block_high', 'block_low',
                                'block_highest', 'block_lowest', 'segment_num', 'block_type', 'block_type', 'No.'])
         block_type: up, down
-        block_relation: up, down, include, included
+        block_relation: up, down, overlap, include, included
         No. 对趋势中的block进行计数，只有三段的不计数
     """
-    block_relation_df = df[df['segment_num'] > 3].diff()[1:]
-    temp_df = df.copy(deep=True)
+
+    # block_relation_df = df[df['segment_num'] > 3].diff()[1:]
+    temp_df = df.copy()
     temp_df['block_type'] = np.nan
     temp_df['block_relation'] = np.nan
     temp_df['No.'] = np.nan
 
+    prev_high = temp_df.block_high[0]
+    prev_highest = temp_df.block_highest[0]
+    prev_low = temp_df.block_low[0]
+    prev_lowest = temp_df.block_lowest[0]
+
     block_index = 0
-
     block_type = block_relation = np.nan
-    for row in block_relation_df.itertuples():
+
+    for row in temp_df[1:].itertuples():
         current_dt = row.Index
+        segment_num = row.segment_num
+        current_high = row.block_high
+        current_highest = row.block_highest
+        current_low = row.block_low
+        current_lowest = row.block_lowest
 
-        if row.block_high >= 0 and row.block_low >= 0:
+        if current_low > prev_high:
             block_type = 'up'
-        elif row.block_high <= 0 and row.block_low <= 0:
+        elif current_high < prev_low:
             block_type = 'down'
-        elif row.block_high >= 0 >= row.block_low:
-            block_type = 'include'
-        elif row.block_high <= 0 <= row.block_low:
-            block_type = 'included'
+        else:
+            log.info('Wrong identification of block!')
 
-        if row.block_highest >= 0 and row.block_lowest >= 0:
-            block_relation = 'up'
-        elif row.block_highest <= 0 and row.block_lowest <= 0:
-            block_relation = 'down'
-        elif row.block_highest >= 0 >= row.block_lowest:
+        if current_highest >= prev_highest and current_lowest >= prev_lowest:
+            if prev_highest > current_lowest:
+                block_relation = 'overlap'
+            else:
+                block_relation = 'up'
+        elif current_highest <= prev_highest and current_lowest <= prev_lowest:
+            if current_highest > prev_lowest:
+                block_relation = 'overlap'
+            else:
+                block_relation = 'down'
+        elif current_highest >= prev_highest and current_lowest <= prev_lowest:
             block_relation = 'include'
-        elif row.block_highest <= 0 <= row.block_lowest:
+        elif current_highest <= prev_highest and current_lowest >= prev_lowest:
             block_relation = 'included'
+        else:
+            log.info('Wrong identification of block!')
 
         temp_df.loc[current_dt, 'block_type'] = block_type
         temp_df.loc[current_dt, 'block_relation'] = block_relation
 
-        block_index = block_index + 1
+        if segment_num > 3:
+            block_index = block_index + 1
 
         # 最后一个block不能确认是top或者bottom,segment_num < 4的情况要计算在内
-        if temp_df.segment_num[current_dt] % 2 == 0 and current_dt != df.index[-1]:
+        if segment_num % 2 == 0 and current_dt != temp_df.index[-1]:
             # if block_type == 'up':
             #     temp_df.loc[current_dt, 'block_type'] = 'top'
             # elif block_type == 'down':
@@ -180,6 +197,10 @@ def identify_blocks_relation(df: pd.DataFrame):
             block_index = 0
 
         temp_df.loc[current_dt, 'No.'] = block_index
+        prev_high = current_high
+        prev_highest = current_highest
+        prev_low = current_low
+        prev_lowest = current_lowest
 
     return temp_df
 
@@ -231,9 +252,9 @@ def identify_blocks(segment_df: pd.DataFrame):
                     if isinstance(segment_df.loc[start_dt, 'peak'], pd.Series) else segment_df.loc[start_dt, 'peak']
             else:
                 segment_num = segment_num + 1
-                block_high = current_high
+                block_low = current_low
                 current_high = min(block_high, row.peak)
-                block_highest = current_highest
+                block_lowest = current_lowest
                 current_highest = max(block_highest, row.peak)
                 end_dt = left_dt
                 left_dt = current_dt
@@ -252,9 +273,9 @@ def identify_blocks(segment_df: pd.DataFrame):
                 block_low = block_lowest = current_low = current_lowest = row.peak
             else:
                 segment_num = segment_num + 1
-                block_low = current_low
+                block_high = current_high
                 current_low = max(block_low, row.peak)
-                block_lowest = current_lowest
+                block_highest = current_highest
                 current_lowest = min(block_lowest, row.peak)
 
                 end_dt = left_dt
@@ -373,6 +394,7 @@ def get_peaks_from_segments(segment_df):
     peak_df = high_df.append(low_df).sort_index()
 
     # 添加被错误删除的点，即两个端点之间还有更高的高点和更低的低点
+    # todo segment_df.index SRL8中有重复项，不能用reindex
     x = peak_df.reindex(segment_df.index, method='bfill')
     y = peak_df.reindex(segment_df.index, method='ffill')
 

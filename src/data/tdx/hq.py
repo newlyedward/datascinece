@@ -85,7 +85,7 @@ def get_future_day_hq(market, code, start=None, end=None):
         f.seek(-32 * factor, 2)
     except OSError:
         f.seek(0, 0)
-        log.warning('%s trade recodes are few and factor = %d is too big.', code, factor)
+        log.info('%s trade recodes are few and factor = %d is too big.', code, factor)
     hq_day_df = _get_future_day_hq(f)
 
     if end:
