@@ -384,8 +384,15 @@ def get_peaks_from_segments(segment_df):
         type        'high' or 'low'
     """
 
-    high_df = segment_df[segment_df['type'] == 'high']
-    low_df = segment_df[segment_df['type'] == 'low']
+    df = segment_df.copy()
+
+    if segment_df.index.duplicated().any():
+        df['sn'] = range(len(df))
+        df.reset_index(inplace=True)
+        df.set_index('sn', inplace=True)
+
+    high_df = df[df['type'] == 'high']
+    low_df = df[df['type'] == 'low']
 
     # 值相等的极值点全部保留
     high_df = high_df.iloc[signal.argrelextrema(high_df.peak.values, np.greater_equal)]
@@ -395,19 +402,23 @@ def get_peaks_from_segments(segment_df):
 
     # 添加被错误删除的点，即两个端点之间还有更高的高点和更低的低点
     # todo segment_df.index SRL8中有重复项，不能用reindex
-    x = peak_df.reindex(segment_df.index, method='bfill')
-    y = peak_df.reindex(segment_df.index, method='ffill')
+    x = peak_df.reindex(df.index, method='bfill')
+    y = peak_df.reindex(df.index, method='ffill')
 
     # 修正端点不是极值点的错误
-    b_compare = x.peak - segment_df.peak
-    f_compare = y.peak - segment_df.peak
+    b_compare = x.peak - df.peak
+    f_compare = y.peak - df.peak
     b1 = np.logical_and(np.logical_and(b_compare > 0, x.type == 'low'), segment_df.type == 'low')
     b2 = np.logical_and(np.logical_and(b_compare < 0, x.type == 'high'), segment_df.type == 'high')
     b3 = np.logical_and(np.logical_and(f_compare > 0, y.type == 'low'), segment_df.type == 'low')
     b4 = np.logical_and(np.logical_and(f_compare < 0, y.type == 'high'), segment_df.type == 'high')
     bflag = np.logical_or(np.logical_or(b1, b2), np.logical_or(b3, b4))
 
-    return peak_df.append(segment_df[bflag]).sort_index()
+    if 'datetime' in peak_df.columns:
+        peak_df.reset_index(inplace=True)
+        del peak_df['sn']
+        peak_df.set_index('datetime', inplace=True)
+    return peak_df.append(segment_df[bflag.values]).sort_index()
 
 
 def get_peaks_from_hq(hq_df):
@@ -468,13 +479,13 @@ if __name__ == "__main__":
     # start = today - timedelta(observation)
     # end = today - timedelta(7)
 
-    block = TsBlock("ML8")
+    block = TsBlock("SRL8")
     # peak = block.get_peaks(start=start, end=end)
     # segment = block.get_segments(start=start)
     # segment = block.get_segments(freq='w')
     # block_df = block.get_blocks()
 
-    block_w = block.get_current_status(freq='w')
+    block_w = block.get_current_status(freq='m')
     # block_d = block.get_current_status(start=start)
     # segment_w = block.get_segments(start=start, freq='w')
     # segment_d = block.get_segments(start=start)
