@@ -35,7 +35,7 @@ class TsBlock:
         :param start: datetime
         :param end: datetime
         :param freq: ('5m', '30m', 'd', 'w')
-        :return: [pd.DataFrame/Series, pd.DataFrame/Series]  升级形成的peak不带kline_no.
+        :return: [pd.DataFrame/Series, pd.DataFrame/Series]  升级形成的peak不带kindex
         """
 
         temp_peak = self.__peaks[freq]
@@ -118,7 +118,7 @@ class TsBlock:
     def get_current_status(self, start=None, end=None, freq='d'):
         temp_block_df = self.get_blocks(start=start, end=start, freq=freq)
         try:
-            dt = temp_block_df.loc[temp_block_df['No.'] == 0].tail(2).index[0]
+            dt = temp_block_df.loc[temp_block_df['sn'] == 0].tail(2).index[0]
             return temp_block_df.loc[dt:]
         except IndexError:
             return temp_block_df
@@ -130,17 +130,17 @@ def identify_blocks_relation(df: pd.DataFrame):
     :param df: pd.DataFrame(columns=['enter_dt', 'start_dt', 'end_dt', 'left_dt', 'block_high', 'block_low',
                                'block_highest', 'block_lowest', 'segment_num'])
     :return: pd.DataFrame(columns=['enter_dt', 'start_dt', 'end_dt', 'left_dt', 'block_high', 'block_low',
-                               'block_highest', 'block_lowest', 'segment_num', 'block_type', 'block_type', 'No.'])
+                               'block_highest', 'block_lowest', 'segment_num', 'block_type', 'block_type', 'sn'])
         block_type: up, down
         block_relation: up, down, overlap, include, included
-        No. 对趋势中的block进行计数，只有三段的不计数
+        sn 对趋势中的block进行计数，只有三段的不计数
     """
 
     # block_relation_df = df[df['segment_num'] > 3].diff()[1:]
     temp_df = df.copy()
     temp_df['block_type'] = np.nan
     temp_df['block_relation'] = np.nan
-    temp_df['No.'] = np.nan
+    temp_df['sn'] = 0
 
     prev_high = temp_df.block_high[0]
     prev_highest = temp_df.block_highest[0]
@@ -196,7 +196,7 @@ def identify_blocks_relation(df: pd.DataFrame):
             #     temp_df.loc[current_dt, 'block_type'] = 'bottom'
             block_index = 0
 
-        temp_df.loc[current_dt, 'No.'] = block_index
+        temp_df.loc[current_dt, 'sn'] = block_index
         prev_high = current_high
         prev_highest = current_highest
         prev_low = current_low
