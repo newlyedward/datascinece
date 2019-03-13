@@ -1,0 +1,95 @@
+# -*- coding: utf-8 -*-
+import pandas as pd
+import numpy as np
+import time
+from datetime import datetime, timedelta
+import re
+
+from src.log import LogHandler
+from src.data.util import get_html_tree
+from src.data.setting import raw_data_dir
+
+log = LogHandler('future.spread.log')
+
+# columns = ["商品", "现货价格", "最近合约代码", "最近合约价格", "最近合约现期差1", "最近合约期现差百分比1", "主力合约代码",
+#            "主力合约价格", "主力合约现期差2", "主力合约现期差百分比2", "日期", "交易所"]
+
+
+columns = ['commodity', 'sprice', 'recent_code', 'recent_price', 'recent_basis', 'recent_basis_prt', 'dominant_code',
+           'dominant_price', 'dominant_basis', 'dominant_basis_prt', 'datetime', 'exchange']
+
+
+def get_spreads_by_date(date_str: list):
+    """
+
+    :param date_str: list of datetime
+    :return: list
+    """
+    url_template = "http://www.100ppi.com/sf/day-{}.html"
+    url = url_template.format(date_str)
+    html = get_html_tree(url)
+    ele_list = html.xpath('//table[@id="fdata"]//tr[@align="center"] | //table[@id="fdata"]//tr/td[@colspan="8"]')
+    ret = []
+    if len(ele_list) == 0:
+        return ret
+    else:
+        exchange = ""
+        for ele in ele_list:
+            if ele.tag == "td":
+                exchange = ele.text
+            elif ele.tag == "tr":
+                raw_val = ele.xpath('./td/a/text()|./td/text()|.//td/font/text()')
+                val = [re.findall(r'^(\S+)\xa0', val)[0] if re.match(r'\S+\xa0', val) else val
+                       for val in raw_val if not re.match(r'^\s+$', val)]
+                val.extend([date_str, exchange])
+                ret.append(val)
+            else:
+                print("the data extracted from url has errors")
+    return ret
+
+
+def get_future_spreads(start, end=datetime.today()):
+    date_list = []
+
+    delta_days = (end - start).days
+    if delta_days >= 0:
+        for i in range(0, delta_days + 1):
+            date = start + timedelta(days=i)
+            if date.weekday() in [5, 6]:
+                continue
+            date_list.append(date.strftime('%Y-%m-%d'))
+    else:
+        print("input params end is earlier than start")
+
+    target = raw_data_dir / 'spread'
+    if not target.exists():
+        target.mkdir()
+    else:
+        file_index = pd.to_datetime([x.name[:-4] for x in target.glob('*.csv')])
+
+        file_df.set_index('datetime', inplace=True)
+
+    index = pd.to_datetime(date_list)
+
+    for date_str in date_list:
+        file_path = target / '{}.csv'.format(date_str)
+        if file_path.exists():
+            continue
+
+        table = get_spreads_by_date(date_str)
+        if len(table) != 0:
+            print(date_str)
+            spread_df = pd.DataFrame(table, columns=columns)
+            spread_df.to_csv(str(file_path), encoding='gb2312')
+        time.sleep(np.random.rand() * 5)
+    return None
+
+
+if __name__ == '__main__':
+    # end_dt = datetime.today()
+    start_dt = datetime(2016, 1, 2)
+    end_dt = datetime(2016, 12, 31)
+    print(datetime.now())
+    get_future_spreads(start_dt, end_dt)
+    print(datetime.now())
+    # write_to_csv(df)
