@@ -146,6 +146,7 @@ def identify_blocks_relation(df: pd.DataFrame):
     prev_highest = temp_df.block_highest[0]
     prev_low = temp_df.block_low[0]
     prev_lowest = temp_df.block_lowest[0]
+    prev_segment_num = temp_df.segment_num[0]
 
     block_index = 0
     block_type = block_relation = np.nan
@@ -185,7 +186,7 @@ def identify_blocks_relation(df: pd.DataFrame):
         temp_df.loc[current_dt, 'block_type'] = block_type
         temp_df.loc[current_dt, 'block_relation'] = block_relation
 
-        if segment_num > 3:
+        if prev_segment_num > 3:
             block_index = block_index + 1
 
         # 最后一个block不能确认是top或者bottom,segment_num < 4的情况要计算在内
@@ -197,6 +198,7 @@ def identify_blocks_relation(df: pd.DataFrame):
             block_index = 0
 
         temp_df.loc[current_dt, 'sn'] = block_index
+        prev_segment_num = segment_num
         prev_high = current_high
         prev_highest = current_highest
         prev_low = current_low

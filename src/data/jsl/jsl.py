@@ -8,7 +8,8 @@ import pandas as pd
 
 from src.log import LogHandler
 from src.data.util import get_html_tree, get_html_text, convert_percent
-from .setting import *   # TODO 单文件运行时 import 错误
+from src.data.setting import raw_data_dir   # TODO 单文件运行时 import 错误
+from src.data.jsl.setting import *
 
 log = LogHandler('jsl.log')
 

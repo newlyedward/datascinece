@@ -133,6 +133,9 @@ def get_future_min_hq(market, code, start=None, end=None, freq='5m'):
     if freq == '5m':
         k_num = int(k_num / 5)
 
+    # TODO 计算两个日期之间的工作日，需要自己添加交易日历
+    # https://www.cnblogs.com/fangbei/p/9075153.html
+    # https: // pypi.org / project / business_calendar /
     delta = (end_dt - start)
     factor = delta.days * k_num
 

@@ -14,7 +14,7 @@ HEADERS = {'Connection': 'keep-alive',
 
 def get_html_text(url, headers=HEADERS):
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
         response.encoding = response.apparent_encoding
         return response.text
@@ -29,6 +29,10 @@ def get_html_tree(url, headers=HEADERS):
     :param headers:
     :return:
     """
-
-    html = requests.get(url=url, headers=headers, timeout=30).content
-    return etree.HTML(html)
+    try:
+        resp = requests.get(url=url, headers=headers, timeout=30)
+        resp.raise_for_status()
+        resp.encoding = resp.apparent_encoding
+        return etree.HTML(resp.text)
+    except:
+        return resp.status_code
