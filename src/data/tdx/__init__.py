@@ -1,13 +1,11 @@
 # -*- coding: utf-8 -*-
 
 import datetime as dt
-# import re
-# import os
 
 from src.log import LogHandler
 
-from .hq import get_future_day_hq, get_future_min_hq
-from .basic import get_future_basic
+from src.data.tdx.hq import get_future_day_hq, get_future_min_hq
+from src.data.tdx.basic import get_future_basic
 
 log = LogHandler('tdx.log')
 

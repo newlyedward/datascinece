@@ -5,18 +5,19 @@ import time
 from datetime import datetime, timedelta
 import re
 
+from src.data.future.utility import get_future_calender
 from src.log import LogHandler
 from src.data.util import get_html_tree
 from src.data.setting import raw_data_dir
 
 log = LogHandler('future.spread.log')
 
-# columns = ["商品", "现货价格", "最近合约代码", "最近合约价格", "最近合约现期差1", "最近合约期现差百分比1", "主力合约代码",
-#            "主力合约价格", "主力合约现期差2", "主力合约现期差百分比2", "日期", "交易所"]
+columns = ["商品", "现货价格", "最近合约代码", "最近合约价格", "最近合约现期差1", "最近合约期现差百分比1", "主力合约代码",
+           "主力合约价格", "主力合约现期差2", "主力合约现期差百分比2", "日期", "交易所"]
 
 
-columns = ['commodity', 'sprice', 'recent_code', 'recent_price', 'recent_basis', 'recent_basis_prt', 'dominant_code',
-           'dominant_price', 'dominant_basis', 'dominant_basis_prt', 'datetime', 'exchange']
+# columns = ['commodity', 'sprice', 'recent_code', 'recent_price', 'recent_basis', 'recent_basis_prt', 'dominant_code',
+#            'dominant_price', 'dominant_basis', 'dominant_basis_prt', 'datetime', 'exchange']
 
 
 def get_spreads_by_date(date_str: list):
@@ -49,41 +50,37 @@ def get_spreads_by_date(date_str: list):
 
 
 def get_future_spreads(start, end=datetime.today()):
-    date_list = []
-
-    delta_days = (end - start).days
-    if delta_days >= 0:
-        for i in range(0, delta_days + 1):
-            date = start + timedelta(days=i)
-            if date.weekday() in [5, 6]:
-                continue
-            date_list.append(date.strftime('%Y-%m-%d'))
-    else:
-        print("input params end is earlier than start")
+    trade_index = get_future_calender(start=start, end=end)
 
     target = raw_data_dir / 'spread'
+
     if not target.exists():
         target.mkdir()
+        file_index = None
     else:
         file_index = pd.to_datetime([x.name[:-4] for x in target.glob('*.csv')])
 
-        file_df.set_index('datetime', inplace=True)
+    if file_index is None:
+        file_index = trade_index
+    else:
+        file_index = trade_index.difference(file_index)
 
-    index = pd.to_datetime(date_list)
-
-    for date_str in date_list:
+    for date in file_index:
+        date_str = date.strftime('%Y-%m-%d')
         file_path = target / '{}.csv'.format(date_str)
         if file_path.exists():
             continue
 
         table = get_spreads_by_date(date_str)
         if len(table) != 0:
-            print(date_str)
+            print(date)
             spread_df = pd.DataFrame(table, columns=columns)
-            spread_df.to_csv(str(file_path), encoding='gb2312')
-        time.sleep(np.random.rand() * 5)
+            spread_df.to_csv(str(file_path), index=False, encoding='gb2312')
+        time.sleep(np.random.rand() * 180)
     return None
 
+# 'D:\\Code\\test\\cookiercutter\\datascience\\datascinece\\src\\data\\future\\code2name.csv'
+# 'D:\Code\test\cookiercutter\datascience\datascinece\data\raw\spread\2016-02-04.csv'
 
 if __name__ == '__main__':
     # end_dt = datetime.today()

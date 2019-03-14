@@ -306,7 +306,7 @@ def sort_one_candle_peaks(peak_df, invert=True):
     df = peak_df.copy()  # 不对输入数据进行操作，有可能改变原始数据
     df['sn'] = range(len(df))
 
-    # TODO 不存在同一个k线上有极值点的处理
+    # 不存在同一个k线上有极值点的处理
     for row in df[df.index.duplicated()].itertuples():
         try:
             if df.type[row.sn] != df.type[row.sn + 1] and invert:
@@ -388,6 +388,7 @@ def get_peaks_from_segments(segment_df):
 
     df = segment_df.copy()
 
+    # segment_df.index SRL8中有重复项，不能用reindex，加入sn列
     if segment_df.index.duplicated().any():
         df['sn'] = range(len(df))
         df.reset_index(inplace=True)
@@ -403,7 +404,7 @@ def get_peaks_from_segments(segment_df):
     peak_df = high_df.append(low_df).sort_index()
 
     # 添加被错误删除的点，即两个端点之间还有更高的高点和更低的低点
-    # todo segment_df.index SRL8中有重复项，不能用reindex
+
     x = peak_df.reindex(df.index, method='bfill')
     y = peak_df.reindex(df.index, method='ffill')
 

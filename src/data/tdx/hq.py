@@ -78,7 +78,7 @@ def get_future_day_hq(market, code, start=None, end=None):
         return _get_future_day_hq(f)
     elif start > end_dt:
         return None
-
+    # TODO 根据交易日历计算实际的交易天数
     delta = (end_dt - start)
     factor = delta.days
     try:
