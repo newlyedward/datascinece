@@ -7,6 +7,7 @@ from pathlib import Path
 from src.log import LogHandler
 from src.data.setting import raw_data_dir, processed_data_dir
 from src.data.future.spread import get_future_spreads
+from src.data.util import convert_percent
 
 log = LogHandler('future.basic.log')
 
@@ -35,17 +36,21 @@ def construct_spread_by_commodity(start=datetime(2011, 1, 2), end=datetime.today
     file_df.query("index>=Timestamp('{}') & index<=Timestamp('{}')".format(start, end),
                   inplace=True)
 
-    frames = [pd.read_csv(x.filepath, encoding='gb2312', header=0, index_col=False)
+    frames = [pd.read_csv(x.filepath, encoding='gb2312', header=0, index_col=False, parse_dates=['日期'],
+                          dtype={'现货价格': 'float64', '最近合约价格': 'float64', '最近合约现期差1': 'float64',
+                                 '主力合约价格': 'float64', '主力合约现期差2': 'float64'})
               for x in file_df.itertuples()]
     spread_df = pd.concat(frames, ignore_index=True)
 
     file_path = Path(__file__).parent / 'code2name.csv'
-    df = pd.read_csv(str(file_path), encoding='gb2312', header=0).dropna()
-    df.set_index('spread', inplace=True)
-    spread_df = spread_df.join(df, on='商品')
-    spread_df['日期'] = pd.to_datetime(spread_df['日期'])
+    code2name_df = pd.read_csv(str(file_path), encoding='gb2312', header=0).dropna()
+    code2name_df.set_index('spread', inplace=True)
+    spread_df = spread_df.join(code2name_df, on='商品')
+    spread_df['最近合约期现差百分比1'] = spread_df['最近合约期现差百分比1'].apply(convert_percent)
+    spread_df['主力合约现期差百分比2'] = spread_df['主力合约现期差百分比2'].apply(convert_percent)
+    # spread_df['日期'] = pd.to_datetime(spread_df['日期'])
     spread_df.set_index('日期', inplace=True)
-    spread_df.to_hdf(target, 'table', format='table',
+    spread_df.to_hdf(str(target), 'table', format='table',
                      append=True, complevel=5, complib='blosc')
 
 
@@ -91,8 +96,10 @@ def get_spreads(commodity=None, start=None, end=None):
 
 if __name__ == '__main__':
     # end_dt = datetime.today()
-    start_dt = datetime(2011, 1, 9)
-    end_dt = datetime(2011, 12, 31)
+    from src.data.future.inventory import get_future_inventory
+    start_dt = datetime(2013, 1, 31)
+    end_dt = datetime(2013, 12, 31)
     print(datetime.now())
+    # get_future_inventory(start=datetime(2014, 5, 23), end=datetime.today())
     df = get_spreads(start=start_dt, end=end_dt)
     print(datetime.now())

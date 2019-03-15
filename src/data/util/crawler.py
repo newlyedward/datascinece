@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 import requests
 from lxml import etree
+from src.log import LogHandler
+
+log = LogHandler('util.crawler.log')
 
 HEADERS = {'Connection': 'keep-alive',
            'Cache-Control': 'max-age=0',
@@ -19,6 +22,7 @@ def get_html_text(url, headers=HEADERS):
         response.encoding = response.apparent_encoding
         return response.text
     except:
+        log.info('{} is {}'.format(url, response.status_code))
         return response.status_code
 
 

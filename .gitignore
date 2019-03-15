@@ -85,7 +85,11 @@ target/
 *.swp
 *.swo
 *.xlsx
-*.csv
+#*.csv
 log/
 notebooks/log/
+notebooks/*.ipynb
 
+notebooks/notebook.tex
+references
+.gitignore
