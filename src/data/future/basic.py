@@ -9,7 +9,7 @@ from src.data.setting import raw_data_dir, processed_data_dir
 from src.data.future.spread import get_future_spreads
 from src.data.util import convert_percent
 
-log = LogHandler('future.basic.log')
+log = LogHandler('future.log')
 
 # 列的英文名称
 columns = ['commodity', 'sprice', 'recent_code', 'recent_price', 'recent_basis', 'recent_basis_prt', 'dominant_code',
@@ -27,7 +27,8 @@ def construct_spread_by_commodity(start=datetime(2011, 1, 2), end=datetime.today
     source = raw_data_dir / 'spread'
 
     # 保证每次将数据更新需要的程度
-    get_future_spreads(start=start, end=end)
+    if get_future_spreads(start=start, end=end) is False:
+        return
 
     # concat raw data from specific date
     file_df = pd.DataFrame([(pd.to_datetime(x.name[:-4]), str(x))
@@ -36,25 +37,35 @@ def construct_spread_by_commodity(start=datetime(2011, 1, 2), end=datetime.today
     file_df.query("index>=Timestamp('{}') & index<=Timestamp('{}')".format(start, end),
                   inplace=True)
 
+    if file_df.empty:
+        return
+
     frames = [pd.read_csv(x.filepath, encoding='gb2312', header=0, index_col=False, parse_dates=['日期'],
                           dtype={'现货价格': 'float64', '最近合约价格': 'float64', '最近合约现期差1': 'float64',
-                                 '主力合约价格': 'float64', '主力合约现期差2': 'float64'})
+                                 '主力合约价格': 'float64', '主力合约现期差2': 'float64', "最近合约代码": 'object',
+                                 "主力合约代码": 'object'})
               for x in file_df.itertuples()]
+
+    if frames:
+        return
     spread_df = pd.concat(frames, ignore_index=True)
 
     file_path = Path(__file__).parent / 'code2name.csv'
-    code2name_df = pd.read_csv(str(file_path), encoding='gb2312', header=0).dropna()
+    code2name_df = pd.read_csv(str(file_path), encoding='gb2312', header=0, usecols=['code', 'spread']).dropna()
     code2name_df.set_index('spread', inplace=True)
     spread_df = spread_df.join(code2name_df, on='商品')
     spread_df['最近合约期现差百分比1'] = spread_df['最近合约期现差百分比1'].apply(convert_percent)
     spread_df['主力合约现期差百分比2'] = spread_df['主力合约现期差百分比2'].apply(convert_percent)
     # spread_df['日期'] = pd.to_datetime(spread_df['日期'])
     spread_df.set_index('日期', inplace=True)
-    spread_df.to_hdf(str(target), 'table', format='table',
-                     append=True, complevel=5, complib='blosc')
+    try:
+        spread_df.to_hdf(str(target), 'table', format='table',
+                         append=True, complevel=5, complib='blosc')
+    except ValueError:  # TypeError
+        log.warning('{}'.format(spread_df.columns))
 
 
-def get_spreads(commodity=None, start=None, end=None):
+def get_spreads(commodity=None, start=None, end=datetime.today()):
     """
     :param commodity  商品简称
     :param start
@@ -84,22 +95,22 @@ def get_spreads(commodity=None, start=None, end=None):
         filtering = ''
 
     if filtering:
-        df = pd.read_hdf(file_string, 'table', where=filtering)
+        spread_df = pd.read_hdf(file_string, 'table', where=filtering)
     else:
-        df = pd.read_hdf(file_string, 'table')
+        spread_df = pd.read_hdf(file_string, 'table')
 
     if commodity is None:
-        return df
+        return spread_df
     else:
-        return df[df['code'] == commodity]
+        return spread_df[spread_df['code'] == commodity]
 
 
 if __name__ == '__main__':
     # end_dt = datetime.today()
-    from src.data.future.inventory import get_future_inventory
-    start_dt = datetime(2013, 1, 31)
-    end_dt = datetime(2013, 12, 31)
+    # from src.data.future.inventory import get_future_inventory
+    start_dt = datetime(2018, 12, 21)
+    end_dt = datetime(2019, 3, 31)
     print(datetime.now())
     # get_future_inventory(start=datetime(2014, 5, 23), end=datetime.today())
-    df = get_spreads(start=start_dt, end=end_dt)
+    df = get_spreads('M', start=start_dt, end=None)
     print(datetime.now())

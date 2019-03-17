@@ -9,6 +9,8 @@ log = LogHandler('future.log')
 # 期货历史交易日历，返回铜期货指数交易日期，2000/1/4开始
 def get_future_calender(start=None, end=None):
     df = get_future_hq('cuL9', start=start, end=end)
+    if df is None:
+        df = get_future_hq('cuL9', start=start)
     return df.index
 
 

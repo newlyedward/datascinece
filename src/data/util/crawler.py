@@ -15,28 +15,53 @@ HEADERS = {'Connection': 'keep-alive',
            }
 
 
-def get_html_text(url, headers=HEADERS):
+def get_html_text(url, headers=HEADERS, encoding=None):
     try:
         response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
-        response.encoding = response.apparent_encoding
+        if encoding is None:
+            response.encoding = response.apparent_encoding
+        else:
+            response.encoding = encoding
         return response.text
     except:
         log.info('{} is {}'.format(url, response.status_code))
         return response.status_code
 
 
-def get_html_tree(url, headers=HEADERS):
+def get_html_tree(url, headers=HEADERS, encoding=None):
     """
     获取html树
     :param url:
     :param headers:
+    :param encoding:
     :return:
     """
     try:
-        resp = requests.get(url=url, headers=headers, timeout=30)
-        resp.raise_for_status()
-        resp.encoding = resp.apparent_encoding
-        return etree.HTML(resp.text)
+        response = requests.get(url=url, headers=headers, timeout=30)
+        response.raise_for_status()
+        if encoding is None:
+            response.encoding = response.apparent_encoding
+        else:
+            response.encoding = encoding
+        return etree.HTML(response.text)
     except:
-        return resp.status_code
+        log.info('{} is {}'.format(url, response.status_code))
+        return response.status_code
+
+
+def get_post_text(url, data=None, headers=HEADERS, encoding=None):
+
+    try:
+        response = requests.post(url=url, data=data, headers=headers, timeout=30)
+        response.raise_for_status()
+        if encoding is None:
+            response.encoding = response.apparent_encoding
+        else:
+            response.encoding = encoding
+        return response.text
+    except:
+        log.info('{} is {}'.format(url, response.status_code))
+        return response.status_code
+
+

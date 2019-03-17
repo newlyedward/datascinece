@@ -10,7 +10,7 @@ from src.log import LogHandler
 from src.data.util import get_html_tree
 from src.data.setting import raw_data_dir
 
-log = LogHandler('future.spread.log')
+log = LogHandler('future.log')
 
 HEADER = ["商品", "现货价格", "最近合约代码", "最近合约价格", "最近合约现期差1", "最近合约期现差百分比1", "主力合约代码",
           "主力合约价格", "主力合约现期差2", "主力合约现期差百分比2", "日期", "交易所"]
@@ -22,7 +22,8 @@ HEADER = ["商品", "现货价格", "最近合约代码", "最近合约价格", 
 
 def get_spreads_from_100ppi(date_str):
     """
-
+    http://www.100ppi.com/sf/  最新的期现表
+    http://www.100ppi.com/sf/day-{}.html 历史期限表，填入%Y-%m-%d
     :param date_str: str of datetime
     :return: list
     """
@@ -42,22 +43,29 @@ def get_spreads_from_100ppi(date_str):
                 raw_val = ele.xpath('./td/a/text()|./td/text()|.//td/font/text()')
                 val = [re.findall(r'^(\S+)\xa0', val)[0] if re.match(r'\S+\xa0', val) else val.strip()
                        for val in raw_val if not re.match(r'^[\r\n\t]+$', val)]
-                assert len(val) == 10
+                if len(val) != 10:
+                    log.warning('{} Spread data is not enough. Url:{}'.fromat(date_str, url))
+                    return []
                 val.extend([date_str, exchange])
                 data.append(val)
             else:
-                print("the data extracted from url has errors")
+                log.info("the data extracted from url has errors")
     return data
 
 
 def get_future_spreads(start=datetime(2011, 1, 1), end=datetime.today()):
     """
-
+    下载数据，存储为csv文件
     :param start: 2011-01-01 最早数据
     :param end:
-    :return:
+    :return: None
     """
-    trade_index = get_future_calender(start=start, end=end)
+    assert start <= end
+    try:
+        trade_index = get_future_calender(start=start, end=end)
+    except AttributeError:
+        log.info('{} to {} are not in trading calender!'.format(start, end))
+        return False
 
     target = raw_data_dir / 'spread'
 
@@ -84,13 +92,13 @@ def get_future_spreads(start=datetime(2011, 1, 1), end=datetime.today()):
             spread_df = pd.DataFrame(table, columns=HEADER)
             spread_df.to_csv(str(file_path), index=False, encoding='gb2312')
         time.sleep(np.random.rand() * 90)
-    return None
+    return True
 
 
 if __name__ == '__main__':
     # end_dt = datetime.today()
-    start_dt = datetime(2016, 1, 2)
-    end_dt = datetime(2016, 12, 31)
+    start_dt = datetime(2017, 1, 1)
+    end_dt = datetime(2019, 3, 31)
     print(datetime.now())
     get_future_spreads(start_dt, end_dt)
     print(datetime.now())
