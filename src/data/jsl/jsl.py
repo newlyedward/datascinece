@@ -8,7 +8,7 @@ import pandas as pd
 
 from src.log import LogHandler
 from src.data.util import get_html_tree, get_html_text, convert_percent
-from src.data.setting import raw_data_dir   # 不能使用相对路径 单文件运行时 import 错误
+from src.data.setting import RAW_DATA_DIR   # 不能使用相对路径 单文件运行时 import 错误
 from src.data.jsl.setting import *
 
 log = LogHandler('jsl.log')
@@ -27,7 +27,7 @@ def is_not_trading():
 
 
 def get_convertible_list():
-    file_path = raw_data_dir / "convertible_list.csv"
+    file_path = RAW_DATA_DIR / "convertible_list.csv"
     file_name = str(file_path)
 
     # 文件存在并且不是交易时间，还需要判断文件足够新才行
@@ -63,7 +63,7 @@ def get_stocks_detail(stocks_id=None):
     :param stocks_id: list or series 'sh603305 sz002478'
     :return: df
     """
-    file_path = raw_data_dir / "stocks_detail.csv"
+    file_path = RAW_DATA_DIR / "stocks_detail.csv"
     file_name = str(file_path)
 
     if isinstance(stocks_id, pd.DataFrame):

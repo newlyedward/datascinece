@@ -12,7 +12,7 @@ import re
 from src.data.future.utils import get_future_calender
 from src.log import LogHandler
 from src.data.util import get_html_text
-from src.data.setting import raw_data_dir
+from src.data.setting import RAW_DATA_DIR
 
 log = LogHandler('future.log')
 
@@ -51,7 +51,7 @@ def get_future_positions(start=datetime(2007, 1, 5), end=datetime.today()):
     """
     trade_index = get_future_calender(start=start, end=end)
 
-    target = raw_data_dir / 'receipt/shfe'
+    target = RAW_DATA_DIR / 'receipt/shfe'
     # 只能建立一级目录，不能向上递归建立
     if not target.exists():
         target.mkdir()

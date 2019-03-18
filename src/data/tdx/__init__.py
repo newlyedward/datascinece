@@ -32,12 +32,12 @@ def get_future_hq(code, start=dt.datetime(1970, 1, 1), end=None, freq='d'):
     # 根据交易品种找到对应的市场
     length = len(code)
     if length == 4:
-        category = code[:2].upper()
+        symbol = code[:2].upper()
     elif length == 3:
-        category = code[0].upper()
+        symbol = code[0].upper()
     else:
         log.warning(code, 'is not listed!')
-    market = future_basic_info.loc[category, 'market']
+    market = future_basic_info.loc[symbol, 'market']
 
     log.info('freq={}'.format(freq))
 

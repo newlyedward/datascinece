@@ -6,10 +6,10 @@ import time
 from datetime import datetime
 import re
 
+from src.data.future.setting import INVENTORY_DIR
 from src.data.future.utils import get_future_calender
 from src.log import LogHandler
 from src.data.util import get_html_text
-from src.data.setting import raw_data_dir
 
 log = LogHandler('future.log')
 
@@ -54,11 +54,11 @@ def get_future_inventory(start=datetime(2007, 1, 5), end=datetime.today()):
     """
     trade_index = get_future_calender(start=start, end=end)
 
-    target = raw_data_dir / 'inventory/shfe'
+    target = INVENTORY_DIR / 'shfe'
 
     if not target.exists():
         target.mkdir()
-        file_index = None
+        file_index = pd.to_datetime([])
     else:
         file_index = pd.to_datetime([x.name[:-4] for x in target.glob('*.csv')])
         # file_index = pd.to_datetime([x.name[:-4] for x in target.glob('*.txt')])
@@ -71,7 +71,7 @@ def get_future_inventory(start=datetime(2007, 1, 5), end=datetime.today()):
     x = pd.Series(trade_index, index=trade_index)
     index = pd.DatetimeIndex(x.resample('W', label='left').last().dropna())
 
-    if file_index is None:
+    if file_index.empty:
         file_index = trade_index
     else:
         file_index = index.difference(file_index)

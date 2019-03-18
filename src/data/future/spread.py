@@ -5,10 +5,10 @@ import time
 from datetime import datetime
 import re
 
-from src.data.future.utils import get_future_calender
+from src.data.future.setting import SPREAD_DIR
+from src.data.future.utils import get_file_index_needed
 from src.log import LogHandler
 from src.data.util import get_html_tree
-from src.data.setting import raw_data_dir
 
 log = LogHandler('future.log')
 
@@ -53,36 +53,24 @@ def get_spreads_from_100ppi(date_str):
     return data
 
 
-def get_future_spreads(start=datetime(2011, 1, 1), end=datetime.today()):
+def get_future_spreads(start=None, end=None):
     """
     下载数据，存储为csv文件
     :param start: 2011-01-01 最早数据
     :param end:
-    :return: None
+    :return: True 下载文件 False 没有下载文件
     """
-    assert start <= end
-    try:
-        trade_index = get_future_calender(start=start, end=end)
-    except AttributeError:
-        log.info('{} to {} are not in trading calender!'.format(start, end))
+    start = datetime(2011, 1, 1) if start is None else start
+    end = datetime.today() if end is None else start
+
+    file_index = get_file_index_needed(SPREAD_DIR, 'csv', start=start, end=end)
+
+    if file_index.empty:
         return False
-
-    target = raw_data_dir / 'spread'
-
-    if not target.exists():
-        target.mkdir()
-        file_index = None
-    else:
-        file_index = pd.to_datetime([x.name[:-4] for x in target.glob('*.csv')])
-
-    if file_index is None:
-        file_index = trade_index
-    else:
-        file_index = trade_index.difference(file_index)
 
     for date in file_index:
         date_str = date.strftime('%Y-%m-%d')
-        file_path = target / '{}.csv'.format(date_str)
+        file_path = SPREAD_DIR / '{}.csv'.format(date_str)
         if file_path.exists():
             continue
 

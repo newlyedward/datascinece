@@ -22,8 +22,8 @@ InteractiveShell.ast_node_interactivity = "all"
 # Custom Import
 # from pathlib import Path
 # homedir = Path(Path.cwd()).parent
-# raw_data_dir = homedir / 'data/raw'
-# reports_dir = homedir / 'reports'
+# RAW_DATA_DIR = homedir / 'data/raw'
+# REPORTS_DIR = homedir / 'reports'
 #
 # import sys
 # sys.path.append(str(homedir))
