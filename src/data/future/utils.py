@@ -39,11 +39,15 @@ def get_file_index_needed(target, ext, start=None, end=None):
         return ret
 
     if not target.exists():
-        target.mkdir()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.mkdir(parents=True, exist_ok=True)
         file_index = ret
     else:
-        file_index = pd.to_datetime([re.search(DATE_PATTERN, x.name)[0]
-                                     for x in target.glob('*.{}'.format(ext))])
+        try:
+            file_index = pd.to_datetime([re.search(DATE_PATTERN, x.name)[0]
+                                         for x in target.glob('*.{}'.format(ext))])
+        except TypeError:  # 目录存在但没有文件
+            file_index = ret
 
     if file_index.empty:
         file_index = trade_index

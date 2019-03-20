@@ -4,8 +4,6 @@ import re
 import pandas as pd
 from datetime import datetime, timedelta
 
-from pathlib import Path
-
 from src.log import LogHandler
 from src.data.setting import PROCESSED_DATA_DIR, DATE_PATTERN, CODE2NAME_PATH
 from src.data.future.setting import SPREAD_DIR
@@ -19,10 +17,10 @@ columns = ['commodity', 'sprice', 'recent_code', 'recent_price', 'recent_basis',
            'dominant_price', 'dominant_basis', 'dominant_basis_prt', 'datetime', 'exchange']
 
 
-def construct_spreads(start=datetime(2011, 1, 2), end=None):
+def construct_spreads(end=None):
     """
     hdf5 文件知道如何插入记录，暂时只能添加在文件尾部，因此要保证 历史数据连续
-    :param start:
+    start=datetime(2011, 1, 2),
     :param end:
     :return:
     """
@@ -31,6 +29,8 @@ def construct_spreads(start=datetime(2011, 1, 2), end=None):
     target = PROCESSED_DATA_DIR / 'spread.h5'
     source = SPREAD_DIR
     update = None
+
+    target.parent.mkdir(parents=True, exist_ok=True)
 
     if target.exists():
         # 找最后一个记录的时间，所有商品相同
@@ -48,7 +48,7 @@ def construct_spreads(start=datetime(2011, 1, 2), end=None):
                             for x in source.glob('*.csv')], columns=['datetime', 'filepath'])
     file_df.set_index('datetime', inplace=True)
     if update:
-        file_df.query("index>=Timestamp('{}') & index<=Timestamp('{}')".format(update, end),
+        file_df.query("index>=Timestamp('{}') & index<=Timestamp('{}')".format(update, pd.to_datetime(end)),
                       inplace=True)
 
     if file_df.empty:
