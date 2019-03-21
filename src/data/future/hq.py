@@ -1,18 +1,19 @@
 # -*- coding: utf-8 -*-
 import json
 import re
-
-import pandas as pd
-import numpy as np
 import time
 from datetime import datetime, timedelta
 
+import numpy as np
+import pandas as pd
+
+from src.data.future.setting import RAW_HQ_DIR, PROCESSED_HQ_DIR, HQ_COLUMNS_PATH, CODE2NAME_TABLE
 from src.data.future.utils import get_file_index_needed
 from src.data.setting import DATE_PATTERN
-from src.log import LogHandler
 from src.data.util.crawler import get_post_text, get_html_text
-from src.data.future.setting import RAW_HQ_DIR, PROCESSED_HQ_DIR, CODE2NAME_PATH, HQ_COLUMNS_PATH
+from src.log import LogHandler
 
+TIME_WAITING = 60
 log = LogHandler('future.log')
 
 
@@ -77,10 +78,12 @@ def get_cffex_hq_by_dates(start=None, end=None, category=0):
 
         assert isinstance(df, pd.DataFrame)
         if df.empty:
+            log.warning('Cffex {} data is not downloaded! '.format(date_str))
+            time.sleep(np.random.rand() * TIME_WAITING * 3)
             continue
 
         df.to_csv(file_path, encoding='gb2312')
-        time.sleep(np.random.rand() * 90)
+        time.sleep(np.random.rand() * TIME_WAITING)
     return True
 
 
@@ -106,6 +109,8 @@ def get_czce_hq_by_date(date: datetime, category=0):
     assert date <= datetime.today()
     assert category in [0, 1]
 
+    index = 1
+
     if date < datetime(2005, 4, 29):
         return pd.DataFrame()
     elif date < datetime(2010, 8, 24):
@@ -114,6 +119,7 @@ def get_czce_hq_by_date(date: datetime, category=0):
     elif date < datetime(2015, 10, 8):
         url_template = 'http://www.czce.com.cn/cn/exchange/{}/datadaily/{}.htm'
         url = url_template.format(date.year, date.strftime('%Y%m%d'))
+        index = 3
     else:
         template = ['http://www.czce.com.cn/cn/DFSStaticFiles/Future/{}/{}/FutureDataDaily.htm',
                     'http://www.czce.com.cn/cn/DFSStaticFiles/Option/{}/{}/OptionDataDaily.htm']
@@ -125,17 +131,7 @@ def get_czce_hq_by_date(date: datetime, category=0):
     if is_data_empty(date.strftime('%Y%m%d'), text):
         return pd.DataFrame()
 
-    # if date < datetime(2008, 3, 19):
-    #     attrs = {'width': '730'}
-    # elif date < datetime(2010, 8, 24):
-    #     attrs = {'width': '790'}
-    # else:
-    #     if category == 0 or date < datetime(2017, 12, 28):
-    #         attrs = {'id': 'senfe'}
-    #     else:
-    #         attrs = {'id': 'tab1'}
-
-    return pd.read_html(text, header=0)[1]
+    return pd.read_html(text, header=0)[index]
 
 
 def get_czce_hq_by_dates(start=None, end=None, category=0):
@@ -166,9 +162,11 @@ def get_czce_hq_by_dates(start=None, end=None, category=0):
         date_str = date.strftime('%Y%m%d')
         file_path = target / '{}_daily.csv'.format(date_str)
         if df.empty:
+            log.warning('Czce {} data is not downloaded! '.format(date_str))
+            time.sleep(np.random.rand() * TIME_WAITING * 3)
             continue
         df.to_csv(file_path, encoding='gb2312')
-        time.sleep(np.random.rand() * 90)
+        time.sleep(np.random.rand() * TIME_WAITING)
 
     return True
 
@@ -223,10 +221,12 @@ def get_shfe_hq_by_dates(start=None, end=None, category=0):
         file_path = target / '{}_daily.txt'.format(date_str)
 
         if is_data_empty(date_str, text):
+            log.warning('Shfe {} data is not downloaded! '.format(date_str))
+            time.sleep(np.random.rand() * TIME_WAITING * 3)
             continue
 
         file_path.write_text(text)
-        time.sleep(np.random.rand() * 90)
+        time.sleep(np.random.rand() * TIME_WAITING)
 
     return True
 
@@ -294,12 +294,45 @@ def get_dce_hq_by_dates(start=None, end=None, category=0):
         file_path = target / '{}_daily.txt'.format(date_str)
 
         if is_data_empty(date_str, text):
+            log.warning('Czce {} data is not downloaded! '.format(date_str))
+            time.sleep(np.random.rand() * TIME_WAITING * 3)
             continue
 
         file_path.write_text(text)
-        time.sleep(np.random.rand() * 90)
+        time.sleep(np.random.rand() * TIME_WAITING)
 
     return True
+
+
+def reload_hq_by_date(date, filepath, market='dce', category=0):
+    """
+    从交易所网站获取某天的所有行情数据，存盘并返回pd.DataFrame
+    :param date: 需要数据的日期
+    :param filepath: 存储文件的地址
+    :param market: 交易所代码
+    :param category: 0:期货 1：期权
+    :return: pd.DataFrame
+    """
+    assert category in [0, 1]
+    if market == 'dce':
+        text = get_dce_hq_by_date(date, category=category)
+        filepath.write_text(text)
+        return pd.read_csv(filepath, encoding='gb2312', header=0, index_col=False,
+                           sep='\s+', thousands=',').dropna()
+    elif market == 'shfe':
+        text = get_shfe_hq_by_date(date, category=category)
+        filepath.write_text(text)
+        return pd.DataFrame(json.loads(filepath.read_text())['o_curinstrument'])
+    elif market == 'czce':
+        hq_df = get_czce_hq_by_date(date, category=category)
+    elif market == 'cffex':
+        hq_df = get_cffex_hq_by_date(date, category=category)
+    else:
+        log.info('Wrong exchange market name!')
+        return pd.DataFrame()
+
+    hq_df.to_csv(filepath, encoding='gb2312')
+    return hq_df
 
 
 def transfer_exchange_data(row, market='dce', category=0):
@@ -313,39 +346,77 @@ def transfer_exchange_data(row, market='dce', category=0):
     assert category in [0, 1]
     assert market in ['dce', 'czce', 'shfe', 'cffex']
 
+    file_path = row.filepath
+    date = row.Index
+
     cols_path = HQ_COLUMNS_PATH[category]
 
     cols_df = pd.read_csv(cols_path, index_col=False, header=0,
-                          usecols=['columns', market, 'dtype'], encoding='gb2312')
+                          usecols=['columns', market], encoding='gb2312')
     cols_df = cols_df.dropna()
-    dtype = dict(cols_df[[market, 'dtype']].values)   # 每列对应转换的数据类型
-    columns = cols_df[market].values   # 需要读取的数据列
+    # dtype = dict(cols_df[[market, 'dtype']].values)  # 每列对应转换的数据类型
+    if market == 'czce' and date < datetime(2015, 10, 8):
+        cols_df.iloc[cols_df['columns'] == 'volume', 'market'] = '成交量'
+    columns = cols_df[market].values  # 需要读取的数据列
     names = cols_df['columns'].values  # 对应的统一后的列的名称
 
-    filepath = row.filepath
-    date = row.Index
-
-    if market == 'dce':   # text
-        hq_df = pd.read_csv(filepath, encoding='gb2312', header=0, index_col=False,
-                            dtype=dtype, sep='\s+', thousands=',').dropna()
+    if market == 'dce':  # text
+        hq_df = pd.read_csv(file_path, encoding='gb2312', header=0, index_col=False,
+                            sep='\s+', thousands=',').dropna()
     elif market == 'shfe':  # json
-        hq_df = json.loads(filepath.read_text())['o_curinstrument']
-        hq_df = hq_df[cols_df[market].values]
-        # 转换数据类型
+        hq_df = pd.DataFrame(json.loads(file_path.read_text())['o_curinstrument'])
     else:
-        hq_df = pd.read_csv(filepath, encoding='gb2312', header=0, index_col=False,
-                            dtype=dtype).dropna()
+        hq_df = pd.read_csv(file_path, encoding='gb2312', header=0, index_col=False)
 
-    if hq_df.empty:  # 原始数据文件为null，重新下载一次数据文件 TODO 分市场讨论
-        text = get_dce_hq_by_date(date, category=category)
-        filepath.write_text(text)
-        hq_df = pd.read_csv(filepath, encoding='gb2312', header=0, index_col=False,
-                            dtype=dtype, sep='\s+', thousands=',').dropna()
+    if hq_df.empty:  # 原始数据文件为null，重新下载一次数据文件
         print('{} hq data is not exist, reload it!'.format(row.filepath))
+        reload_hq_by_date(date, file_path, market=market, category=category)
         assert not hq_df.empty
 
+    hq_df = hq_df[cols_df[market].values]
+    hq_df = hq_df.dropna()
     hq_df = hq_df[columns]
     hq_df.columns = names
+
+    # 商品字母缩写转换
+    if market == 'shfe':
+        hq_df = hq_df[hq_df['settle'] != '']
+        hq_df.loc[:, 'commodity'] = hq_df['commodity'].str.strip()
+
+    if market in ['shfe', 'dce']:
+        code2name_table = CODE2NAME_TABLE.loc[CODE2NAME_TABLE['market'] == market, ['code', 'exchange']]
+        code2name_table.set_index('exchange', inplace=True)
+        hq_df = hq_df.join(code2name_table, on='commodity')
+        del hq_df['commodity']
+    elif market in ['czce', 'cffex']:
+        hq_df['code'] = hq_df['deliver'].apply(lambda x: re.search('^[a-zA-Z]{1,2}', x)[0])
+    else:
+        log.info('Wrong exchange market name!')
+        return pd.DataFrame()
+
+    # 提取交割月份
+    def convert_deliver(x):
+        m = re.search('\d{3,4}$', x)[0]
+        return m if len(m) == 4 else '0{}'.format(m)
+
+    if market in ['dce', 'czce']:
+        hq_df['deliver'] = hq_df['deliver'].apply(convert_deliver)
+
+    # 数据类型转换，避免合并时出现错误
+    hq_df['open'] = pd.to_numeric(hq_df['open'])
+    hq_df['close'] = pd.to_numeric(hq_df['close'])
+    hq_df['high'] = pd.to_numeric(hq_df['high'])
+    hq_df['low'] = pd.to_numeric(hq_df['low'])
+    hq_df['settle'] = pd.to_numeric(hq_df['settle'])
+    hq_df['presettle'] = pd.to_numeric(hq_df['presettle'])
+
+    hq_df['volume'] = pd.to_numeric(hq_df['volume'])
+    hq_df['openInt'] = pd.to_numeric(hq_df['openInt'])
+
+    # 计算成交金额
+    if market == 'shfe':
+        hq_df['amount'] = hq_df['volume'] * hq_df['close']
+
     hq_df['datetime'] = date
     return hq_df
 
@@ -439,9 +510,16 @@ if __name__ == '__main__':
     print(datetime.now())
     # get_czce_hq_by_date(end_dt)
     # get_dce_hq_by_dates(category=0)
-    # get_shfe_hq_by_dates(category=1)
-    get_dce_hq_by_dates(category=0)
+    # get_shfe_hq_by_dates(category=0)
+    # get_czce_hq_by_dates(category=0)
     # construct_dce_hq(end=end_dt, category=0)
     # df = pd.read_csv(file_path, encoding='gb2312', sep='\s+')
     # df = get_future_hq('M', start=start_dt, end=None)
+    from pathlib import Path
+    from collections import namedtuple
+
+    filepath = Path(r'D:\Code\test\cookiercutter\datascience\datascinece\data\raw\future_hq\czce\20160302_daily.csv')
+    Pandas = namedtuple('Pandas', 'Index filepath')
+    row = Pandas(Index=datetime(2016, 3, 2), filepath=filepath)
+    transfer_exchange_data(row, market='czce')
     print(datetime.now())

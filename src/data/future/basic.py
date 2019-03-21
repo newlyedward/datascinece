@@ -5,8 +5,8 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 from src.log import LogHandler
-from src.data.setting import PROCESSED_DATA_DIR, DATE_PATTERN, CODE2NAME_PATH
-from src.data.future.setting import SPREAD_DIR
+from src.data.setting import PROCESSED_DATA_DIR, DATE_PATTERN
+from src.data.future.setting import SPREAD_DIR, CODE2NAME_TABLE
 from src.data.future.spread import get_future_spreads
 from src.data.util import convert_percent
 
@@ -66,10 +66,9 @@ def construct_spreads(end=None):
         return
     spread_df = pd.concat(frames, ignore_index=True)
 
-    code2name_df = pd.read_csv(CODE2NAME_PATH, encoding='gb2312', header=0,
-                               usecols=['code', 'spread']).dropna()
-    code2name_df.set_index('spread', inplace=True)
-    spread_df = spread_df.join(code2name_df, on='商品')
+    code2name_table = CODE2NAME_TABLE[['code', 'spread']]
+    code2name_table.set_index('spread', inplace=True)
+    spread_df = spread_df.join(code2name_table, on='商品')
     spread_df['最近合约期现差百分比1'] = spread_df['最近合约期现差百分比1'].apply(convert_percent)
     spread_df['主力合约现期差百分比2'] = spread_df['主力合约现期差百分比2'].apply(convert_percent)
     spread_df.set_index('日期', inplace=True)
