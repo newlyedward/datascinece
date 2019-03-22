@@ -14,7 +14,7 @@ from src.data.util.crawler import get_post_text, get_html_text
 from src.log import LogHandler
 
 TIME_WAITING = 60
-log = LogHandler('future.log')
+log = LogHandler('future.hq.log')
 
 
 def is_data_empty(date_str, text):
@@ -42,10 +42,13 @@ def get_cffex_hq_by_date(date: datetime, category=0):
     assert date <= datetime.today()
     assert category in [0, 1]
 
-    url_template = 'http://www.cffex.com.cn/sj/hqsj/rtj/{}/{}/{}_1.csv'
-    url = url_template.format(date.strftime('%Y%m'), date.day, date.strftime('%Y%m%d'))
+    # url_template = 'http://www.cffex.com.cn/sj/hqsj/rtj/{}/{}/{}_1.csv'
+    url_template = 'http://www.cffex.com.cn/fzjy/mrhq/{}/{}/{}_1.csv'
+    url = url_template.format(date.strftime('%Y%m'), date.strftime('%d'), date.strftime('%Y%m%d'))
+    # url_template = 'http://www.cffex.com.cn/sj/hqsj/rtj/{}/{}/index.xml'
+    # url = url_template.format(date.strftime('%Y%m'), date.strftime('%d'))
 
-    return pd.read_csv(url, encoding='gb2312')
+    return get_html_text(url)
 
 
 def get_cffex_hq_by_dates(start=None, end=None, category=0):
@@ -72,17 +75,17 @@ def get_cffex_hq_by_dates(start=None, end=None, category=0):
 
     for date in file_index:
         print(date)
-        df = get_cffex_hq_by_date(date, category=category)
+        text = get_cffex_hq_by_date(date, category=category)
         date_str = date.strftime('%Y%m%d')
         file_path = target / '{}_daily.csv'.format(date_str)
 
-        assert isinstance(df, pd.DataFrame)
-        if df.empty:
+        assert isinstance(text, str)
+        if not text.startswith('合约代码'):
             log.warning('Cffex {} data is not downloaded! '.format(date_str))
             time.sleep(np.random.rand() * TIME_WAITING * 3)
             continue
 
-        df.to_csv(file_path, encoding='gb2312')
+        file_path.write_text(text)
         time.sleep(np.random.rand() * TIME_WAITING)
     return True
 
@@ -95,8 +98,9 @@ def get_czce_hq_by_date(date: datetime, category=0):
     期权 datetime(2017, 4, 19)
     http://www.czce.com.cn/cn/DFSStaticFiles/Option/2018/20180816/OptionDataDaily.htm
     http://www.czce.com.cn/cn/DFSStaticFiles/Option/2017/20171109/OptionDataDaily.htm
-    datetime(2015, 9, 19)
+    datetime(2015, 10, 8)
     http://www.czce.com.cn/cn/exchange/2015/datadaily/20150821.htm
+    http://www.czce.com.cn/cn/exchange/2015/datadaily/20150930.txt
     datetime(2010, 8, 24)
     http://www.czce.com.cn/cn/exchange/jyxx/hq/hq20100806.html
     datetime(2005, 4, 29)
@@ -109,13 +113,14 @@ def get_czce_hq_by_date(date: datetime, category=0):
     assert date <= datetime.today()
     assert category in [0, 1]
 
-    index = 1
+    index = 0
 
     if date < datetime(2005, 4, 29):
         return pd.DataFrame()
     elif date < datetime(2010, 8, 24):
         url_template = 'http://www.czce.com.cn/cn/exchange/jyxx/hq/hq{}.html'
         url = url_template.format(date.strftime('%Y%m%d'))
+        index = 1
     elif date < datetime(2015, 10, 8):
         url_template = 'http://www.czce.com.cn/cn/exchange/{}/datadaily/{}.htm'
         url = url_template.format(date.year, date.strftime('%Y%m%d'))
@@ -335,31 +340,33 @@ def reload_hq_by_date(date, filepath, market='dce', category=0):
     return hq_df
 
 
-def transfer_exchange_data(row, market='dce', category=0):
+def transfer_exchange_data(file_row, market='dce', category=0):
     """
     将每天的数据统一标准存入中间数据文件
     :param category: o 期货 1 期权
     :param market: 交易市场缩写
-    :param row: collections.namedtuple,  a namedtuple for each row in the DataFrame
+    :param file_row: collections.namedtuple,  a namedtuple for each row in the DataFrame
     :return:
     """
     assert category in [0, 1]
     assert market in ['dce', 'czce', 'shfe', 'cffex']
 
-    file_path = row.filepath
-    date = row.Index
+    file_path = file_row.filepath
+    date = file_row.Index
 
     cols_path = HQ_COLUMNS_PATH[category]
 
     cols_df = pd.read_csv(cols_path, index_col=False, header=0,
                           usecols=['columns', market], encoding='gb2312')
     cols_df = cols_df.dropna()
-    # dtype = dict(cols_df[[market, 'dtype']].values)  # 每列对应转换的数据类型
-    if market == 'czce' and date < datetime(2015, 10, 8):
-        cols_df.iloc[cols_df['columns'] == 'volume', 'market'] = '成交量'
     columns = cols_df[market].values  # 需要读取的数据列
     names = cols_df['columns'].values  # 对应的统一后的列的名称
 
+    # dtype = dict(cols_df[[market, 'dtype']].values)  # 每列对应转换的数据类型
+    if market == 'czce' and date < datetime(2010, 8, 24) and category == 0:
+        cols_df.loc[cols_df['columns'] == 'volume', 'czce'] = '成交量'
+
+    # 读取需转换的原始数据文件
     if market == 'dce':  # text
         hq_df = pd.read_csv(file_path, encoding='gb2312', header=0, index_col=False,
                             sep='\s+', thousands=',').dropna()
@@ -369,54 +376,79 @@ def transfer_exchange_data(row, market='dce', category=0):
         hq_df = pd.read_csv(file_path, encoding='gb2312', header=0, index_col=False)
 
     if hq_df.empty:  # 原始数据文件为null，重新下载一次数据文件
-        print('{} hq data is not exist, reload it!'.format(row.filepath))
+        print('{} hq data is not exist, reload it!'.format(file_row.filepath))
         reload_hq_by_date(date, file_path, market=market, category=category)
         assert not hq_df.empty
 
+    # 截取所需字段，并将字段名转换为统一标准
     hq_df = hq_df[cols_df[market].values]
     hq_df = hq_df.dropna()
     hq_df = hq_df[columns]
     hq_df.columns = names
 
-    # 商品字母缩写转换
+    # 处理上海市场的空格和多余行
     if market == 'shfe':
         hq_df = hq_df[hq_df['settle'] != '']
-        hq_df.loc[:, 'commodity'] = hq_df['commodity'].str.strip()
+        if category == 0:
+            hq_df.loc[:, 'commodity'] = hq_df['commodity'].str.strip()
+        else:
+            hq_df.loc[:, 'symbol'] = hq_df['symbol'].str.strip()
 
-    if market in ['shfe', 'dce']:
-        code2name_table = CODE2NAME_TABLE.loc[CODE2NAME_TABLE['market'] == market, ['code', 'exchange']]
-        code2name_table.set_index('exchange', inplace=True)
-        hq_df = hq_df.join(code2name_table, on='commodity')
-        del hq_df['commodity']
-    elif market in ['czce', 'cffex']:
-        hq_df['code'] = hq_df['deliver'].apply(lambda x: re.search('^[a-zA-Z]{1,2}', x)[0])
-    else:
-        log.info('Wrong exchange market name!')
-        return pd.DataFrame()
+    # 商品字母缩写转换和合约代码组织
+    if category == 0:
+        if market in ['shfe', 'dce']:
+            code2name_table = CODE2NAME_TABLE.loc[CODE2NAME_TABLE['market'] == market, ['code', 'exchange']]
+            code2name_table.set_index('exchange', inplace=True)
+            hq_df = hq_df.join(code2name_table, on='commodity')
+            del hq_df['commodity']
+        elif market in ['czce', 'cffex']:
+            hq_df['code'] = hq_df['symbol'].apply(lambda x: re.search('^[a-zA-Z]{1,2}', x)[0])
+        else:
+            log.info('Wrong exchange market name!')
+            return pd.DataFrame()
 
-    # 提取交割月份
-    def convert_deliver(x):
-        m = re.search('\d{3,4}$', x)[0]
-        return m if len(m) == 4 else '0{}'.format(m)
+        # 提取交割月份
+        def convert_deliver(x):
+            if not isinstance(x, str):
+                x = str(x).strip()
+            m = re.search('\d{3,4}$', x.strip())[0]
+            return m if len(m) == 4 else '0{}'.format(m)
 
-    if market in ['dce', 'czce']:
-        hq_df['deliver'] = hq_df['deliver'].apply(convert_deliver)
+        if market in ['dce', 'czce']:  # cffex symbol不需要转换
+            hq_df['symbol'] = hq_df['code'] + hq_df['symbol'].apply(convert_deliver)
+
+    else:  # category = 1 期权
+        hq_df.loc[:, 'symbol'] = hq_df['symbol'].str.upper()\
+            .str.replace('-', '').str.strip()
+        split_re = hq_df['symbol'].transform(
+            lambda x: re.search('^([A-Z]{1,2})(\d{3,4})-?([A-Z])-?(\d+)', x))
+        assert split_re is not None
+        hq_df['code'] = split_re.transform(lambda x: x[1])
+        hq_df['future_symbol'] = split_re.transform(
+            lambda x: x[1] + (x[2] if len(x[2]) == 4 else '0{}'.format(x[2])))
+        hq_df['type'] = split_re.transform(lambda x: x[3])
+        hq_df['exeprice'] = pd.to_numeric(split_re.transform(lambda x: x[4]), downcast='float')
 
     # 数据类型转换，避免合并时出现错误
-    hq_df['open'] = pd.to_numeric(hq_df['open'])
-    hq_df['close'] = pd.to_numeric(hq_df['close'])
-    hq_df['high'] = pd.to_numeric(hq_df['high'])
-    hq_df['low'] = pd.to_numeric(hq_df['low'])
-    hq_df['settle'] = pd.to_numeric(hq_df['settle'])
-    hq_df['presettle'] = pd.to_numeric(hq_df['presettle'])
+    hq_df['open'] = pd.to_numeric(hq_df['open'], downcast='float')
+    hq_df['close'] = pd.to_numeric(hq_df['close'], downcast='float')
+    hq_df['high'] = pd.to_numeric(hq_df['high'], downcast='float')
+    hq_df['low'] = pd.to_numeric(hq_df['low'], downcast='float')
+    hq_df['settle'] = pd.to_numeric(hq_df['settle'], downcast='float')
 
-    hq_df['volume'] = pd.to_numeric(hq_df['volume'])
-    hq_df['openInt'] = pd.to_numeric(hq_df['openInt'])
+    hq_df['volume'] = pd.to_numeric(hq_df['volume'], downcast='integer')
+    hq_df['openInt'] = pd.to_numeric(hq_df['openInt'], downcast='integer')
+
+    # 行权量和delta只有期权独有
+    if category == 1:
+        hq_df['exevolume'] = pd.to_numeric(hq_df['exevolume'], downcast='integer')
+        hq_df['delta'] = pd.to_numeric(hq_df['delta'], downcast='float')
 
     # 计算成交金额
-    if market == 'shfe':
-        hq_df['amount'] = hq_df['volume'] * hq_df['close']
-
+    if market == 'shfe' and category == 0:  # 这样计算的不准确，只能近似
+        hq_df['amount'] = pd.to_numeric(hq_df['volume'] * hq_df['close'], downcast='float')
+    else:
+        hq_df['amount'] = pd.to_numeric(hq_df['amount'], downcast='float') * 10000
     hq_df['datetime'] = date
     return hq_df
 
@@ -511,15 +543,16 @@ if __name__ == '__main__':
     # get_czce_hq_by_date(end_dt)
     # get_dce_hq_by_dates(category=0)
     # get_shfe_hq_by_dates(category=0)
-    # get_czce_hq_by_dates(category=0)
+    # get_cffex_hq_by_dates(category=0)
     # construct_dce_hq(end=end_dt, category=0)
     # df = pd.read_csv(file_path, encoding='gb2312', sep='\s+')
     # df = get_future_hq('M', start=start_dt, end=None)
     from pathlib import Path
     from collections import namedtuple
 
-    filepath = Path(r'D:\Code\test\cookiercutter\datascience\datascinece\data\raw\future_hq\czce\20160302_daily.csv')
+    filepath = Path(
+        r'D:\Code\test\cookiercutter\datascience\datascinece\data\raw\future_option\shfe\20181024_daily.txt')
     Pandas = namedtuple('Pandas', 'Index filepath')
-    row = Pandas(Index=datetime(2016, 3, 2), filepath=filepath)
-    transfer_exchange_data(row, market='czce')
+    row = Pandas(Index=datetime(2018, 10, 24), filepath=filepath)
+    transfer_exchange_data(row, market='shfe', category=1)
     print(datetime.now())
