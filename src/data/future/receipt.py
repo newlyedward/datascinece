@@ -7,7 +7,7 @@ from datetime import datetime
 import re
 
 from src.data.future.setting import RECEIPT_DIR
-from src.data.future.utils import get_future_calender, get_file_index_needed
+from src.data.future.utils import get_future_calender, get_download_file_index
 from src.log import LogHandler
 from src.data.util import get_html_text
 
@@ -44,7 +44,7 @@ def get_future_receipts(start=datetime(2007, 1, 5), end=datetime.today()):
     :param end:
     :return: True 下载文件 False 没有下载文件
     """
-    file_index = get_file_index_needed(RECEIPT_DIR, 'csv', start=start, end=end)
+    file_index = get_download_file_index(RECEIPT_DIR, 'csv', start=start, end=end)
 
     if file_index.empty:
         return False

@@ -8,9 +8,9 @@ import numpy as np
 import pandas as pd
 
 from src.data.future.setting import RAW_HQ_DIR, PROCESSED_HQ_DIR, HQ_COLUMNS_PATH, CODE2NAME_TABLE
-from src.data.future.utils import get_file_index_needed
+from src.data.future.utils import get_download_file_index
 from src.data.setting import DATE_PATTERN
-from src.data.util.crawler import get_post_text, get_html_text
+from src.data.util import get_post_text, get_html_text, connect_mongo, read_mongo, to_mongo
 from src.log import LogHandler
 
 TIME_WAITING = 60
@@ -68,7 +68,7 @@ def get_cffex_hq_by_dates(start=None, end=None, category=0):
 
     target = RAW_HQ_DIR[category] / 'cffex'
 
-    file_index = get_file_index_needed(target, 'csv', start=start, end=end)
+    file_index = get_download_file_index(target, start=start, end=end)
 
     if file_index.empty:
         return False
@@ -77,7 +77,7 @@ def get_cffex_hq_by_dates(start=None, end=None, category=0):
         print(date)
         text = get_cffex_hq_by_date(date, category=category)
         date_str = date.strftime('%Y%m%d')
-        file_path = target / '{}_daily.csv'.format(date_str)
+        file_path = target / '{}_daily.txt'.format(date_str)
 
         assert isinstance(text, str)
         if not text.startswith('合约代码'):
@@ -156,7 +156,7 @@ def get_czce_hq_by_dates(start=None, end=None, category=0):
 
     target = RAW_HQ_DIR[category] / 'czce'
 
-    file_index = get_file_index_needed(target, 'csv', start=start, end=end)
+    file_index = get_download_file_index(target, start=start, end=end)
 
     if file_index.empty:
         return False
@@ -165,7 +165,7 @@ def get_czce_hq_by_dates(start=None, end=None, category=0):
         print(date)
         df = get_czce_hq_by_date(date, category=category)
         date_str = date.strftime('%Y%m%d')
-        file_path = target / '{}_daily.csv'.format(date_str)
+        file_path = target / '{}_daily.txt'.format(date_str)
         if df.empty:
             log.warning('Czce {} data is not downloaded! '.format(date_str))
             time.sleep(np.random.rand() * TIME_WAITING * 3)
@@ -214,7 +214,7 @@ def get_shfe_hq_by_dates(start=None, end=None, category=0):
 
     target = RAW_HQ_DIR[category] / 'shfe'
 
-    file_index = get_file_index_needed(target, 'txt', start=start, end=end)
+    file_index = get_download_file_index(target, start=start, end=end)
 
     if file_index.empty:
         return False
@@ -287,7 +287,7 @@ def get_dce_hq_by_dates(start=None, end=None, category=0):
 
     target = RAW_HQ_DIR[category] / 'dce'
 
-    file_index = get_file_index_needed(target, 'txt', start=start, end=end)
+    file_index = get_download_file_index(target, start=start, end=end)
 
     if file_index.empty:
         return False
@@ -342,11 +342,11 @@ def reload_hq_by_date(date, filepath, market='dce', category=0):
 
 def transfer_exchange_data(file_row, market='dce', category=0):
     """
-    将每天的数据统一标准存入中间数据文件
+    将每天的数据统一标准
     :param category: o 期货 1 期权
     :param market: 交易市场缩写
     :param file_row: collections.namedtuple,  a namedtuple for each row in the DataFrame
-    :return:
+    :return: pd.DataFrame 统一标准后的数据
     """
     assert category in [0, 1]
     assert market in ['dce', 'czce', 'shfe', 'cffex']
@@ -418,7 +418,7 @@ def transfer_exchange_data(file_row, market='dce', category=0):
             hq_df['symbol'] = hq_df['code'] + hq_df['symbol'].apply(convert_deliver)
 
     else:  # category = 1 期权
-        hq_df.loc[:, 'symbol'] = hq_df['symbol'].str.upper()\
+        hq_df.loc[:, 'symbol'] = hq_df['symbol'].str.upper() \
             .str.replace('-', '').str.strip()
         split_re = hq_df['symbol'].transform(
             lambda x: re.search('^([A-Z]{1,2})(\d{3,4})-?([A-Z])-?(\d+)', x))
@@ -450,10 +450,11 @@ def transfer_exchange_data(file_row, market='dce', category=0):
     else:
         hq_df['amount'] = pd.to_numeric(hq_df['amount'], downcast='float') * 10000
     hq_df['datetime'] = date
+    hq_df['market'] = market
     return hq_df
 
 
-def construct_dce_hq(end=None, market='dce', category=0):
+def get_hq_from_mongo(start, end, symbol, code, market='dce', category=0):
     """
     hdf5 文件知道如何插入记录，暂时只能添加在文件尾部，因此要保证 历史数据连续
     start=datetime(2005, 1, 2),
@@ -465,23 +466,26 @@ def construct_dce_hq(end=None, market='dce', category=0):
     assert category in [0, 1]
     assert market in ['dce', 'czce', 'shfe', 'cffex']
 
-    end = datetime.today() if end is None else end
+    end = end if end else datetime.today()
 
-    # 商品中文名和字母缩写对照表
-    df = pd.read_csv(CODE2NAME_PATH, encoding='gb2312', header=0,
-                     usecols=['code', 'market', 'exchange']).dropna()
+    # 首先判断数据库是否更新
+    db = connect_mongo(db='quote')
 
-    df = df[df['market'] == market]
-    del df['market']
-    assert not df.empty
+    if category == 0:
+        cursor = db['future']
+    else:
+        cursor = db['option']
 
-    source = RAW_HQ_DIR[category] / market
+    target = RAW_HQ_DIR[category] / market
 
-    filename = ['{}_future_hq.day'.format(market), '{}_option_hq.day'.format(market)]
+    # 交易日历中有而原始数据文件中没有
+    file_index = get_download_file_index(target, start=start, end=end)
 
-    target = PROCESSED_HQ_DIR[category] / filename[category]
-    target.parent.mkdir(parents=True, exist_ok=True)
+    if not file_index.empty:
+        # TODO 直接传入需要下载数据的日期
+        eval('get_{}_hq_by_dates(start=update, end=end, category=category)'.format(market))
 
+    # TODO 查找需要插入数据库的数据
     update = None
     if target.exists():
         # 找最后一个记录的时间，所有商品相同
@@ -506,35 +510,6 @@ def construct_dce_hq(end=None, market='dce', category=0):
     if file_df.empty:
         return
 
-    # 数据有错位和缺失值，转换int32会出错，后续计算也会出现浮点数
-    dtype = [{'开盘价': 'float64', '最高价': 'float64', '最低价': 'float64', '收盘价': 'float64',
-              '结算价': 'float64', '涨跌': 'float64', '涨跌1': 'float64', '成交量': 'float64',
-              '持仓量': 'float64', '持仓量变化': 'float64', '成交额	': 'float64',
-              "商品名称": 'object', "交割月份": 'object'},
-             {'开盘价': 'float64', '最高价': 'float64', '最低价': 'float64', '收盘价': 'float64',
-              '前结算价': 'float64', 'Delta': 'float64', '行权量': 'float64',
-              '结算价': 'float64', '涨跌': 'float64', '涨跌1': 'float64', '成交量': 'float64',
-              '持仓量': 'float64', '持仓量变化': 'float64', '成交额	': 'float64',
-              "商品名称": 'object', "合约名称": 'object'}]
-    # 读取数据转换内容
-
-    frames = [transfer_exchange_data(x) for x in file_df.itertuples()]
-
-    if len(frames) == 0:
-        return
-
-    spread_df = pd.concat(frames, ignore_index=True)
-
-    df.set_index('exchange', inplace=True)
-    spread_df = spread_df.join(df, on='商品名称')
-
-    spread_df.set_index('日期', inplace=True)
-    try:
-        spread_df.to_hdf(target, 'table', format='table',
-                         append=True, complevel=5, complib='blosc')
-    except ValueError:  # TypeError
-        log.warning('{}'.format(spread_df.columns))
-
 
 if __name__ == '__main__':
     start_dt = datetime(2014, 12, 21)
@@ -550,9 +525,12 @@ if __name__ == '__main__':
     from pathlib import Path
     from collections import namedtuple
 
+    date = datetime(2018, 10, 25)
     filepath = Path(
-        r'D:\Code\test\cookiercutter\datascience\datascinece\data\raw\future_option\shfe\20181024_daily.txt')
+        r'D:\Code\test\cookiercutter\datascience\datascinece\data\raw\future_option\shfe\{}_daily.txt'
+            .format(date.strftime('%Y%m%d')))
     Pandas = namedtuple('Pandas', 'Index filepath')
-    row = Pandas(Index=datetime(2018, 10, 24), filepath=filepath)
-    transfer_exchange_data(row, market='shfe', category=1)
+    row = Pandas(Index=date, filepath=filepath)
+    df = transfer_exchange_data(row, market='shfe', category=1)
+    result = to_mongo('quote', 'option', df.to_dict('records'))
     print(datetime.now())

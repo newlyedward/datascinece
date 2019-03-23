@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 from pathlib import Path
 
+MONGODB_URI = '192.168.2.88'
+MONGODB_PORT = 27017
+
 HOME_DIR = Path(__file__).parent.parent.parent
 RAW_DATA_DIR = HOME_DIR / 'data/raw'
 PROCESSED_DATA_DIR = HOME_DIR / 'data/processed'

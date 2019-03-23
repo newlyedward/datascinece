@@ -6,9 +6,9 @@ from datetime import datetime
 import re
 
 from src.data.future.setting import SPREAD_DIR
-from src.data.future.utils import get_file_index_needed
+from src.data.future.utils import get_download_file_index
 from src.log import LogHandler
-from src.data.util import get_html_tree
+from src.data.util import get_html_tree, read_mongo, to_mongo
 
 log = LogHandler('future.log')
 
@@ -63,7 +63,7 @@ def get_future_spreads(start=None, end=None):
     start = datetime(2011, 1, 1) if start is None else start
     end = datetime.today() if end is None else start
 
-    file_index = get_file_index_needed(SPREAD_DIR, 'csv', start=start, end=end)
+    file_index = get_download_file_index(SPREAD_DIR, 'csv', start=start, end=end)
 
     if file_index.empty:
         return False
