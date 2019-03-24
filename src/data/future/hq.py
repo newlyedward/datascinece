@@ -13,7 +13,7 @@ from src.data.setting import DATE_PATTERN, RAW_HQ_DIR, INSTRUMENT_TYPE
 from src.data.util import get_post_text, get_html_text, connect_mongo, read_mongo, to_mongo
 from src.log import LogHandler
 
-TIME_WAITING = 5
+TIME_WAITING = 3
 log = LogHandler('future.hq.log')
 
 
@@ -25,7 +25,7 @@ def is_data_empty(data):
     """
     if isinstance(data, pd.DataFrame):
         return data.empty
-    elif isinstance(data, str) and len(data) < 110:
+    elif not isinstance(data, str) or len(data) < 110:
         return True
     else:
         return False
@@ -100,7 +100,22 @@ def get_czce_hq_by_date(date: datetime, category=0):
     if is_data_empty(text):
         return pd.DataFrame()
 
-    return pd.read_html(text, header=0)[index]
+    tables = pd.read_html(text, header=0)
+
+    df = tables[index]
+
+    bflag = df.empty or len(df.columns) < 10 or len(df.columns) > 20
+
+    if not bflag:
+        return df
+
+    # 处理特殊的例外情况 2017-12-27 index=3
+    for df in tables:
+        bflag = df.empty or len(df.columns) < 10 or len(df.columns) > 20
+        if not bflag:
+            return df
+
+    return pd.DataFrame()
 
 
 def get_shfe_hq_by_date(date: datetime, category=0):
@@ -179,14 +194,14 @@ def get_hq_by_dates(market, category=0):
                             'dce': get_dce_hq_by_date}
 
     for dt in file_index:
-        print('{} download {} {} hq data!'.format(
-            datetime.now().strftime('%H:%M:%S'), market, dt.strftime('%Y-%m-%d')))
+        print('{} downloading {} {} hq:{} data!'.format(
+            datetime.now().strftime('%H:%M:%S'), market, dt.strftime('%Y-%m-%d'), category))
         data = get_exchange_hq_func[market](dt, category=category)
         date_str = dt.strftime('%Y%m%d')
         file_path = target / '{}.day'.format(date_str)
 
         if is_data_empty(data):
-            log.warning('{} {} data is not downloaded! '.format(market, date_str))
+            log.warning('{} {} data:{} is not downloaded! '.format(market, date_str, category))
             time.sleep(np.random.rand() * TIME_WAITING * 3)
             continue
 
@@ -224,8 +239,11 @@ def reload_hq_by_date(date, filepath, market='dce', category=0):
     else:
         log.info('Wrong exchange market name!')
         return pd.DataFrame()
-
-    hq_df.to_csv(filepath, encoding='gb2312')
+    if hq_df.empty:
+        log.warning('{} instrument type {} data is still not exist!'.format(market, category))
+    else:
+        hq_df.to_csv(filepath, encoding='gb2312')
+        print('Reload {} instrument type {} data successful!'.format(market, category))
     return hq_df
 
 
@@ -264,13 +282,17 @@ def transfer_exchange_data(file_row, market='dce', category=0):
     else:
         hq_df = pd.read_csv(file_path, encoding='gb2312', header=0, index_col=False)
 
-    if hq_df.empty:  # 原始数据文件为null，重新下载一次数据文件
-        print('{} hq data is not exist, reload it!'.format(file_row.filepath))
-        reload_hq_by_date(date, file_path, market=market, category=category)
-        assert not hq_df.empty
+    bflag = hq_df.empty or len(hq_df.columns) < len(columns) or len(hq_df.columns) > 20
+    if bflag:  # 原始数据文件为null，重新下载一次数据文件
+        print('{} instrument type:{} {} hq data is not exist, reload it!'.
+              format(market, category, file_row.filepath.name))
+        hq_df = reload_hq_by_date(date, file_path, market=market, category=category)
+        bflag = hq_df.empty or len(hq_df.columns) < len(columns) or len(hq_df.columns) > 20
+        if bflag:
+            return hq_df
 
     # 截取所需字段，并将字段名转换为统一标准
-    hq_df = hq_df[cols_df[market].values]
+    # hq_df = hq_df[cols_df[market].values]
     hq_df = hq_df.dropna()
     hq_df = hq_df[columns]
     hq_df.columns = names
@@ -358,17 +380,19 @@ def insert_hq_to_mongo():
         t = INSTRUMENT_TYPE[c]
         cursor = conn[t]
         for m in market:
-            get_hq_by_dates(m, c)
+            # get_hq_by_dates(m, c)
 
             file_df = get_insert_mongo_files(m, c)
 
             if file_df.empty:
-                print('{} instrument type:{} is updated before!'.format(m, str(c)))
+                print('{} instrument type:{} is updated before!'.format(m, t))
                 continue
 
-            for row in file_df:
+            for row in file_df.itertuples():
                 df = transfer_exchange_data(row, m, c)
-                result = cursor.insert_many(df.to_dic('records'))
+                if df.empty:
+                    continue
+                result = cursor.insert_many(df.to_dict('records'))
                 if result is False:
                     print('{} {} {} insert failure.'.format(m, t, row.filepath.name))
                 else:

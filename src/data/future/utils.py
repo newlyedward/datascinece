@@ -13,6 +13,8 @@ log = LogHandler('future.log')
 
 # 期货历史交易日历，返回铜期货指数交易日期，2000/1/4开始
 def get_future_calender(start=None, end=None):
+    if start > datetime.today():
+        return pd.DatetimeIndex()
     df = get_future_hq('cuL9', start=start, end=end)
     if df is None:
         df = get_future_hq('cuL9', start=start)
@@ -63,11 +65,12 @@ def get_insert_mongo_files(market, category):
 
     date_index = cursor.distinct('datetime', {'market': market})
 
-    if not date_index:
-        return pd.DataFrame()
-
     file_df = get_exist_files(market, category)
-    mongo_index = pd.datetime(date_index)
+
+    if len(date_index) == 0:
+        return file_df
+
+    mongo_index = pd.to_datetime(date_index)
     file_index = file_df.index.difference(mongo_index)
     file_df = file_df.loc[file_index]
 

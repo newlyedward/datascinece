@@ -6,6 +6,10 @@ from src.log import LogHandler
 
 log = LogHandler('db.log')
 
+# client = pymongo.MongoClient("mongodb+srv://unistar:<password>
+# @cluster0-y9smy.azure.mongodb.net/test?retryWrites=true")
+# db = client.test
+
 
 def connect_mongo(db, username='', password='', host=MONGODB_URI, port=MONGODB_PORT):
     """ A util for making a connection to mongo """
