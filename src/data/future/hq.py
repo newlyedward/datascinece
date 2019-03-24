@@ -8,12 +8,12 @@ import numpy as np
 import pandas as pd
 
 from src.data.future.setting import HQ_COLUMNS_PATH, CODE2NAME_TABLE
-from src.data.future.utils import get_download_file_index
-from src.data.setting import DATE_PATTERN, RAW_HQ_DIR
+from src.data.future.utils import get_download_file_index, get_insert_mongo_files
+from src.data.setting import DATE_PATTERN, RAW_HQ_DIR, INSTRUMENT_TYPE
 from src.data.util import get_post_text, get_html_text, connect_mongo, read_mongo, to_mongo
 from src.log import LogHandler
 
-TIME_WAITING = 60
+TIME_WAITING = 5
 log = LogHandler('future.hq.log')
 
 
@@ -26,7 +26,6 @@ def is_data_empty(data):
     if isinstance(data, pd.DataFrame):
         return data.empty
     elif isinstance(data, str) and len(data) < 110:
-        log.info('{} is fail, status: {}'.format(data))
         return True
     else:
         return False
@@ -344,56 +343,46 @@ def transfer_exchange_data(file_row, market='dce', category=0):
     return hq_df
 
 
-def insert_hq_to_mongo(market='dce', category=0):
+def insert_hq_to_mongo():
     """
     下载数据文件，插入mongo数据库
-    :param market: ['dce', 'czce', 'shfe', 'cffex']
-    :param category: 0 期货 1 期权
     :return:
     """
-    assert category in [0, 1]
-    assert market in ['dce', 'czce', 'shfe', 'cffex']
+    category = [0, 1]
+    market = ['dce', 'czce', 'shfe', 'cffex']
 
-    # 交易日历中有而原始数据文件中没有
-    file_index = get_download_file_index(market, category)
+    conn = connect_mongo(db='quote')
 
-    if not file_index.empty:
-        # TODO 直接传入需要下载数据的日期
-        eval('get_{}_hq_by_dates(start=update, end=end, category=category)'.format(market))
+    # 首先尝试下载数据
+    for c in category:
+        t = INSTRUMENT_TYPE[c]
+        cursor = conn[t]
+        for m in market:
+            get_hq_by_dates(m, c)
 
-    # TODO 查找需要插入数据库的数据
-    update = None
-    if target.exists():
-        # 找最后一个记录的时间，所有商品相同
-        last = pd.read_hdf(target, 'table', start=-1)
-        update = last.index[0] + timedelta(1)
+            file_df = get_insert_mongo_files(m, c)
 
-        if update > end:
-            return
+            if file_df.empty:
+                print('{} instrument type:{} is updated before!'.format(m, str(c)))
+                continue
 
-    # 保证每次将数据更新需要的程度
-    eval('get_{}_hq_by_dates(start=update, end=end, category=category)'.format(market))
-
-    # 查取需要读取的原始数据文件,原始数据文件必须以日期开头命名，前4位数字代表年份
-    file_df = pd.DataFrame([(pd.to_datetime(re.search(DATE_PATTERN, x.name)[0]), x)
-                            for x in source.glob('[0-9][0-9][0-9][0-9]*')], columns=['datetime', 'filepath'])
-    file_df.set_index('datetime', inplace=True)
-
-    if update:
-        file_df.query("index>=Timestamp('{}') & index<=Timestamp('{}')".format(update, end),
-                      inplace=True)
-
-    if file_df.empty:
-        return
+            for row in file_df:
+                df = transfer_exchange_data(row, m, c)
+                result = cursor.insert_many(df.to_dic('records'))
+                if result is False:
+                    print('{} {} {} insert failure.'.format(m, t, row.filepath.name))
+                else:
+                    print('{} {} {} insert success.'.format(m, t, row.filepath.name))
+            print('{} instrument type:{} is updated now!'.format(m, t))
 
 
 if __name__ == '__main__':
-    start_dt = datetime(2014, 12, 21)
-    end_dt = datetime(2005, 1, 4)
+    # start_dt = datetime(2014, 12, 21)
+    # end_dt = datetime(2005, 1, 4)
     print(datetime.now())
     # get_czce_hq_by_date(end_dt)
     # get_dce_hq_by_dates(category=0)
-    get_hq_by_dates('cffex', category=0)
+    # get_hq_by_dates('cffex', category=0)
     # get_cffex_hq_by_dates(category=0)
     # construct_dce_hq(end=end_dt, category=0)
     # df = pd.read_csv(file_path, encoding='gb2312', sep='\s+')
@@ -409,4 +398,5 @@ if __name__ == '__main__':
     # row = Pandas(Index=date, filepath=filepath)
     # df = transfer_exchange_data(row, market='shfe', category=1)
     # result = to_mongo('quote', 'option', df.to_dict('records'))
+    insert_hq_to_mongo()
     print(datetime.now())

@@ -36,12 +36,12 @@ def get_download_file_index(market, category):
         log.info('From {} to today are not in trading calender!'.format(start))
         return ret
 
-    file_df = get_exist_files(market, category).index
+    file_index = get_exist_files(market, category).index
 
-    if file_df.empty:
+    if file_index.empty:
         file_index = trade_index
     else:
-        file_index = trade_index.difference(file_df.index)
+        file_index = trade_index.difference(file_index)
 
     return file_index
 
@@ -61,13 +61,15 @@ def get_insert_mongo_files(market, category):
     conn = connect_mongo(db='quote')
     cursor = conn[INSTRUMENT_TYPE[category]]
 
-    mongo_index = pd.datetime(cursor.distinct('datetime', {'market': market}))
+    date_index = cursor.distinct('datetime', {'market': market})
+
+    if not date_index:
+        return pd.DataFrame()
 
     file_df = get_exist_files(market, category)
-
-    if mongo_index:
-        file_index = file_df.index.difference(mongo_index)
-        file_df = file_df.loc[file_index]
+    mongo_index = pd.datetime(date_index)
+    file_index = file_df.index.difference(mongo_index)
+    file_df = file_df.loc[file_index]
 
     return file_df
 
