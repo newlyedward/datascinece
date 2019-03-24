@@ -7,9 +7,9 @@ from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 
-from src.data.future.setting import RAW_HQ_DIR, PROCESSED_HQ_DIR, HQ_COLUMNS_PATH, CODE2NAME_TABLE
+from src.data.future.setting import HQ_COLUMNS_PATH, CODE2NAME_TABLE
 from src.data.future.utils import get_download_file_index
-from src.data.setting import DATE_PATTERN
+from src.data.setting import DATE_PATTERN, RAW_HQ_DIR
 from src.data.util import get_post_text, get_html_text, connect_mongo, read_mongo, to_mongo
 from src.log import LogHandler
 
@@ -17,12 +17,16 @@ TIME_WAITING = 60
 log = LogHandler('future.hq.log')
 
 
-def is_data_empty(date_str, text):
-    if not isinstance(text, str):
-        log.info('{} is fail, status: {}'.format(date_str, text))
-        return True
-    elif len(text) < 110:
-        log.info('{} is null, status: {}'.format(date_str, text))
+def is_data_empty(data):
+    """
+    判断数据是否存在
+    :param data: pd.DataFrame or str
+    :return: True 数据不存在
+    """
+    if isinstance(data, pd.DataFrame):
+        return data.empty
+    elif isinstance(data, str) and len(data) < 110:
+        log.info('{} is fail, status: {}'.format(data))
         return True
     else:
         return False
@@ -36,7 +40,7 @@ def get_cffex_hq_by_date(date: datetime, category=0):
 
     :param date: datetime
     :param category: 行情类型, 0期货 或 1期权
-    :return 不成功返回0
+    :return str
 
     """
     assert date <= datetime.today()
@@ -49,45 +53,6 @@ def get_cffex_hq_by_date(date: datetime, category=0):
     # url = url_template.format(date.strftime('%Y%m'), date.strftime('%d'))
 
     return get_html_text(url)
-
-
-def get_cffex_hq_by_dates(start=None, end=None, category=0):
-    """
-    根据日期连续下载中国金融期货交易所日交易数据 20100430 期货数据起始日
-    :param start: datetime
-    :param end: datetime
-    :param start:
-    :param category: 行情类型, 0期货 或 1期权
-    :return True or False
-    """
-    assert category in [0, 1]
-
-    start = datetime(2010, 4, 30) if category == 0 else datetime.today() \
-        if start is None else start
-    end = datetime.today() if end is None else end
-
-    target = RAW_HQ_DIR[category] / 'cffex'
-
-    file_index = get_download_file_index(target, start=start, end=end)
-
-    if file_index.empty:
-        return False
-
-    for date in file_index:
-        print(date)
-        text = get_cffex_hq_by_date(date, category=category)
-        date_str = date.strftime('%Y%m%d')
-        file_path = target / '{}_daily.txt'.format(date_str)
-
-        assert isinstance(text, str)
-        if not text.startswith('合约代码'):
-            log.warning('Cffex {} data is not downloaded! '.format(date_str))
-            time.sleep(np.random.rand() * TIME_WAITING * 3)
-            continue
-
-        file_path.write_text(text)
-        time.sleep(np.random.rand() * TIME_WAITING)
-    return True
 
 
 def get_czce_hq_by_date(date: datetime, category=0):
@@ -107,7 +72,7 @@ def get_czce_hq_by_date(date: datetime, category=0):
 
     :param date: datetime
     :param category: 行情类型, 0期货 或 1期权
-    :return 不成功返回0
+    :return pd.DataFrame
 
     """
     assert date <= datetime.today()
@@ -133,47 +98,10 @@ def get_czce_hq_by_date(date: datetime, category=0):
 
     text = get_html_text(url)
 
-    if is_data_empty(date.strftime('%Y%m%d'), text):
+    if is_data_empty(text):
         return pd.DataFrame()
 
     return pd.read_html(text, header=0)[index]
-
-
-def get_czce_hq_by_dates(start=None, end=None, category=0):
-    """
-    根据日期连续下载郑州商品交易所日交易数据 20050429 期货数据起始日 20170419 期权数据起始日
-    :param start: datetime
-    :param end: datetime
-    :param start:
-    :param category: 行情类型, 0期货 或 1期权
-    :return pd.DataFrame
-    """
-    assert category in [0, 1]
-
-    start = datetime(2005, 4, 29) if category == 0 else datetime(2017, 4, 19) \
-        if start is None else start
-    end = datetime.today() if end is None else end
-
-    target = RAW_HQ_DIR[category] / 'czce'
-
-    file_index = get_download_file_index(target, start=start, end=end)
-
-    if file_index.empty:
-        return False
-
-    for date in file_index:
-        print(date)
-        df = get_czce_hq_by_date(date, category=category)
-        date_str = date.strftime('%Y%m%d')
-        file_path = target / '{}_daily.txt'.format(date_str)
-        if df.empty:
-            log.warning('Czce {} data is not downloaded! '.format(date_str))
-            time.sleep(np.random.rand() * TIME_WAITING * 3)
-            continue
-        df.to_csv(file_path, encoding='gb2312')
-        time.sleep(np.random.rand() * TIME_WAITING)
-
-    return True
 
 
 def get_shfe_hq_by_date(date: datetime, category=0):
@@ -183,7 +111,7 @@ def get_shfe_hq_by_date(date: datetime, category=0):
     http://www.shfe.com.cn/data/dailydata/option/kx/kx20190315.dat
     :param date: datetime
     :param category: 行情类型, 0期货 或 1期权
-    :return 不成功返回0
+    :return str
 
     """
     assert date <= datetime.today()
@@ -194,46 +122,6 @@ def get_shfe_hq_by_date(date: datetime, category=0):
     url = url_template[category].format(date.strftime('%Y%m%d'))
 
     return get_html_text(url)
-
-
-def get_shfe_hq_by_dates(start=None, end=None, category=0):
-    """
-    根据日期连续下载上海商品交易所日交易数据 20020108/20090105 期货数据起始日 2018921 期权数据起始日
-    20040625 期货数据缺失
-    :param start: datetime
-    :param end: datetime
-    :param start:
-    :param category: 行情类型, 0期货 或 1期权
-    :return pd.DataFrame
-    """
-    assert category in [0, 1]
-
-    start = datetime(2002, 1, 8) if category == 0 else datetime(2018, 9, 21) \
-        if start is None else start
-    end = datetime.today() if end is None else end
-
-    target = RAW_HQ_DIR[category] / 'shfe'
-
-    file_index = get_download_file_index(target, start=start, end=end)
-
-    if file_index.empty:
-        return False
-
-    for date in file_index:
-        print(date)
-        text = get_shfe_hq_by_date(date, category=category)
-        date_str = date.strftime('%Y%m%d')
-        file_path = target / '{}_daily.txt'.format(date_str)
-
-        if is_data_empty(date_str, text):
-            log.warning('Shfe {} data is not downloaded! '.format(date_str))
-            time.sleep(np.random.rand() * TIME_WAITING * 3)
-            continue
-
-        file_path.write_text(text)
-        time.sleep(np.random.rand() * TIME_WAITING)
-
-    return True
 
 
 def get_dce_hq_by_date(date: datetime, code='all', category=0):
@@ -252,7 +140,7 @@ def get_dce_hq_by_date(date: datetime, code='all', category=0):
     :param code: 商品代码
     :param date: datetime
     :param category: 行情类型, 0期货 或 1期权
-    :return 不成功返回0
+    :return str
 
     """
     assert date <= datetime.today()
@@ -268,44 +156,46 @@ def get_dce_hq_by_date(date: datetime, code='all', category=0):
     return get_post_text(url, form_data)
 
 
-def get_dce_hq_by_dates(start=None, end=None, category=0):
+def get_hq_by_dates(market, category=0):
     """
-    根据日期连续下载大连商品交易所日交易数据 20050104 期货数据起始日 2017331 期权数据起始日
-    20000508 开始数据，商品名称 大豆
-    :param start: datetime
-    :param end: datetime
-    :param start:
+    根据日期连续下载交易所日交易数据
+    :param market:
     :param category: 行情类型, 0期货 或 1期权
     :return True False: 说明不用下载数据
 
     """
     assert category in [0, 1]
+    assert market in ['dce', 'czce', 'shfe', 'cffex']
 
-    start = datetime(2000, 5, 8) if category == 0 else datetime(2017, 3, 31) \
-        if start is None else start
-    end = datetime.today() if end is None else end
+    target = RAW_HQ_DIR[category] / market
 
-    target = RAW_HQ_DIR[category] / 'dce'
-
-    file_index = get_download_file_index(target, start=start, end=end)
+    file_index = get_download_file_index(market, category)
 
     if file_index.empty:
         return False
 
-    for date in file_index:
-        print(date)
-        text = get_dce_hq_by_date(date, category=category)
-        date_str = date.strftime('%Y%m%d')
-        file_path = target / '{}_daily.txt'.format(date_str)
+    get_exchange_hq_func = {'cffex': get_cffex_hq_by_date,
+                            'czce': get_czce_hq_by_date,
+                            'shfe': get_shfe_hq_by_date,
+                            'dce': get_dce_hq_by_date}
 
-        if is_data_empty(date_str, text):
-            log.warning('Czce {} data is not downloaded! '.format(date_str))
+    for dt in file_index:
+        print('{} download {} {} hq data!'.format(
+            datetime.now().strftime('%H:%M:%S'), market, dt.strftime('%Y-%m-%d')))
+        data = get_exchange_hq_func[market](dt, category=category)
+        date_str = dt.strftime('%Y%m%d')
+        file_path = target / '{}.day'.format(date_str)
+
+        if is_data_empty(data):
+            log.warning('{} {} data is not downloaded! '.format(market, date_str))
             time.sleep(np.random.rand() * TIME_WAITING * 3)
             continue
 
-        file_path.write_text(text)
+        if market == 'czce':
+            data.to_csv(file_path, encoding='gb2312')
+        else:
+            file_path.write_text(data)
         time.sleep(np.random.rand() * TIME_WAITING)
-
     return True
 
 
@@ -454,32 +344,18 @@ def transfer_exchange_data(file_row, market='dce', category=0):
     return hq_df
 
 
-def get_hq_from_mongo(start, end, symbol, code, market='dce', category=0):
+def insert_hq_to_mongo(market='dce', category=0):
     """
-    hdf5 文件知道如何插入记录，暂时只能添加在文件尾部，因此要保证 历史数据连续
-    start=datetime(2005, 1, 2),
+    下载数据文件，插入mongo数据库
     :param market: ['dce', 'czce', 'shfe', 'cffex']
     :param category: 0 期货 1 期权
-    :param end:
     :return:
     """
     assert category in [0, 1]
     assert market in ['dce', 'czce', 'shfe', 'cffex']
 
-    end = end if end else datetime.today()
-
-    # 首先判断数据库是否更新
-    db = connect_mongo(db='quote')
-
-    if category == 0:
-        cursor = db['future']
-    else:
-        cursor = db['option']
-
-    target = RAW_HQ_DIR[category] / market
-
     # 交易日历中有而原始数据文件中没有
-    file_index = get_download_file_index(target, start=start, end=end)
+    file_index = get_download_file_index(market, category)
 
     if not file_index.empty:
         # TODO 直接传入需要下载数据的日期
@@ -517,7 +393,7 @@ if __name__ == '__main__':
     print(datetime.now())
     # get_czce_hq_by_date(end_dt)
     # get_dce_hq_by_dates(category=0)
-    # get_shfe_hq_by_dates(category=0)
+    get_hq_by_dates('cffex', category=0)
     # get_cffex_hq_by_dates(category=0)
     # construct_dce_hq(end=end_dt, category=0)
     # df = pd.read_csv(file_path, encoding='gb2312', sep='\s+')
@@ -525,12 +401,12 @@ if __name__ == '__main__':
     from pathlib import Path
     from collections import namedtuple
 
-    date = datetime(2018, 10, 25)
-    filepath = Path(
-        r'D:\Code\test\cookiercutter\datascience\datascinece\data\raw\future_option\shfe\{}_daily.txt'
-            .format(date.strftime('%Y%m%d')))
-    Pandas = namedtuple('Pandas', 'Index filepath')
-    row = Pandas(Index=date, filepath=filepath)
-    df = transfer_exchange_data(row, market='shfe', category=1)
-    result = to_mongo('quote', 'option', df.to_dict('records'))
+    # date = datetime(2018, 10, 25)
+    # filepath = Path(
+    #     r'D:\Code\test\cookiercutter\datascience\datascinece\data\raw\future_option\shfe\{}_daily.txt'
+    #         .format(date.strftime('%Y%m%d')))
+    # Pandas = namedtuple('Pandas', 'Index filepath')
+    # row = Pandas(Index=date, filepath=filepath)
+    # df = transfer_exchange_data(row, market='shfe', category=1)
+    # result = to_mongo('quote', 'option', df.to_dict('records'))
     print(datetime.now())

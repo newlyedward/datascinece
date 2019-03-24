@@ -2,9 +2,9 @@
 import re
 
 import pandas as pd
-from datetime import datetime
 
-from src.data.setting import DATE_PATTERN
+from src.data.setting import DATE_PATTERN, INSTRUMENT_TYPE, TRADE_BEGIN_DATE, RAW_HQ_DIR
+from src.data.util import connect_mongo
 from src.log import LogHandler
 from src.data.tdx import get_future_hq
 
@@ -19,25 +19,24 @@ def get_future_calender(start=None, end=None):
     return df.index
 
 
-def get_download_file_index(target, start=None, end=None):
+def get_download_file_index(market, category):
     """
     计算需要下载的文件
-    :param target: 数据目录
-    :param start: 需要数据的起始日期
-    :param end:
+    :param market:
+    :param category:
     :return: pandas.core.indexes.datetimes.DatetimeIndex 日期的索引值
     """
-    assert start <= end <= datetime.today()
+    start = TRADE_BEGIN_DATE[market][category]
 
     ret = pd.to_datetime([])
 
     try:
-        trade_index = get_future_calender(start=start, end=end)
+        trade_index = get_future_calender(start=start)
     except AttributeError:
-        log.info('{} to {} are not in trading calender!'.format(start, end))
+        log.info('From {} to today are not in trading calender!'.format(start))
         return ret
 
-    file_df = get_exist_files(target).index
+    file_df = get_exist_files(market, category).index
 
     if file_df.empty:
         file_index = trade_index
@@ -47,35 +46,43 @@ def get_download_file_index(target, start=None, end=None):
     return file_index
 
 
-def get_insert_files(source, cursor, market):
+def get_insert_mongo_files(market, category):
     """
-    计算需要下载的文件
+    计算需要插入数据的文件
     :param market:
-    :param cursor:
-    :param source: 原始下载数据目录
-    :return: pandas.core.indexes.datetimes.DatetimeIndex 日期的索引值
-    """
-    assert market in ['dce', 'czce', 'shfe', 'cffex']
-
-    mongo_index = pd.datetime(cursor.distinct('datetime', {'market': market}))
-
-    file_df = get_exist_files(source)
-
-    if mongo_index:
-        file_index = file_df.index.difference(mongo_index)
-
-    return file_index
-
-
-def get_exist_files(source):
-    """
-    计算需要下载的文件
-    :param source: 数据目录
+    :param category:
     :return:
     pandas.DataFrame
         datetime: index
         filepath: pathlib.Path
     """
+    assert market in ['dce', 'czce', 'shfe', 'cffex']
+
+    conn = connect_mongo(db='quote')
+    cursor = conn[INSTRUMENT_TYPE[category]]
+
+    mongo_index = pd.datetime(cursor.distinct('datetime', {'market': market}))
+
+    file_df = get_exist_files(market, category)
+
+    if mongo_index:
+        file_index = file_df.index.difference(mongo_index)
+        file_df = file_df.loc[file_index]
+
+    return file_df
+
+
+def get_exist_files(market, category):
+    """
+    计算需要下载的文件
+    :param market:
+    :param category:
+    :return:
+    pandas.DataFrame
+        datetime: index
+        filepath: pathlib.Path
+    """
+    source = RAW_HQ_DIR[category] / market
     ret = pd.DataFrame()
 
     if not source.exists():

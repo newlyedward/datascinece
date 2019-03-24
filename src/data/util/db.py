@@ -7,7 +7,7 @@ from src.log import LogHandler
 log = LogHandler('db.log')
 
 
-def connect_mongo(username, password, db, host=MONGODB_URI, port=MONGODB_PORT):
+def connect_mongo(db, username='', password='', host=MONGODB_URI, port=MONGODB_PORT):
     """ A util for making a connection to mongo """
 
     if username and password:
