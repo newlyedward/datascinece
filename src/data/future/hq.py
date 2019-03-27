@@ -1,19 +1,18 @@
 # -*- coding: utf-8 -*-
 import json
 import re
-import time
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
 
 from src.data.future.setting import HQ_COLUMNS_PATH, CODE2NAME_TABLE
 from src.data.future.utils import get_download_file_index, get_insert_mongo_files
-from src.data.setting import DATE_PATTERN, RAW_HQ_DIR, INSTRUMENT_TYPE
-from src.data.util import get_post_text, get_html_text, connect_mongo, read_mongo, to_mongo
+from src.data.setting import RAW_HQ_DIR, INSTRUMENT_TYPE
+from src.data.util import get_post_text, get_html_text, connect_mongo, read_mongo
 from src.log import LogHandler
 
-TIME_WAITING = 3
+# TIME_WAITING = 1
 log = LogHandler('future.hq.log')
 
 
@@ -25,13 +24,17 @@ def is_data_empty(data):
     """
     if isinstance(data, pd.DataFrame):
         return data.empty
-    elif not isinstance(data, str) or len(data) < 110:
+    elif not isinstance(data, str):
+        return True
+    elif re.search('doctype', data, re.I):
+        return True
+    elif len(data) < 100:
         return True
     else:
         return False
 
 
-def get_cffex_hq_by_date(date: datetime, category=0):
+def download_cffex_hq_by_date(date: datetime, category=0):
     """
     获取中国金融期货交易所交易所日交易数据 datetime(2010, 4, 30)
     http://www.cffex.com.cn/sj/hqsj/rtj/201903/13/20190313_1.csv
@@ -45,16 +48,13 @@ def get_cffex_hq_by_date(date: datetime, category=0):
     assert date <= datetime.today()
     assert category in [0, 1]
 
-    # url_template = 'http://www.cffex.com.cn/sj/hqsj/rtj/{}/{}/{}_1.csv'
     url_template = 'http://www.cffex.com.cn/fzjy/mrhq/{}/{}/{}_1.csv'
     url = url_template.format(date.strftime('%Y%m'), date.strftime('%d'), date.strftime('%Y%m%d'))
-    # url_template = 'http://www.cffex.com.cn/sj/hqsj/rtj/{}/{}/index.xml'
-    # url = url_template.format(date.strftime('%Y%m'), date.strftime('%d'))
 
     return get_html_text(url)
 
 
-def get_czce_hq_by_date(date: datetime, category=0):
+def download_czce_hq_by_date(date: datetime, category=0):
     """
     获取郑州商品交易所日交易数据
     http://www.czce.com.cn/cn/DFSStaticFiles/Future/2019/20190314/FutureDataDaily.txt
@@ -78,6 +78,7 @@ def get_czce_hq_by_date(date: datetime, category=0):
     assert category in [0, 1]
 
     index = 0
+    ret = pd.DataFrame()
 
     if date < datetime(2005, 4, 29):
         return pd.DataFrame()
@@ -98,7 +99,7 @@ def get_czce_hq_by_date(date: datetime, category=0):
     text = get_html_text(url)
 
     if is_data_empty(text):
-        return pd.DataFrame()
+        return ret
 
     tables = pd.read_html(text, header=0)
 
@@ -115,10 +116,10 @@ def get_czce_hq_by_date(date: datetime, category=0):
         if not bflag:
             return df
 
-    return pd.DataFrame()
+    return ret
 
 
-def get_shfe_hq_by_date(date: datetime, category=0):
+def download_shfe_hq_by_date(date: datetime, category=0):
     """
     获取上海商品交易所日交易数据 20020108/20090105 期货数据起始日（还可以往前取） 2018921 期权数据起始日
     http://www.shfe.com.cn/data/dailydata/kx/kx20190318.dat
@@ -138,7 +139,7 @@ def get_shfe_hq_by_date(date: datetime, category=0):
     return get_html_text(url)
 
 
-def get_dce_hq_by_date(date: datetime, code='all', category=0):
+def download_dce_hq_by_date(date: datetime, code='all', category=0):
     """
     获取大连商品交易所日交易数据 20050104 期货数据起始日 2017331 期权数据起始日
     url = 'http://www.dce.com.cn//publicweb/quotesdata/dayQuotesCh.html'
@@ -170,7 +171,40 @@ def get_dce_hq_by_date(date: datetime, code='all', category=0):
     return get_post_text(url, form_data)
 
 
-def get_hq_by_dates(market, category=0):
+def download_hq_by_date(date, file_path, market='dce', category=0):
+    """
+    从交易所网站获取某天的所有行情数据，存盘并返回pd.DataFrame
+    :param date: 需要数据的日期
+    :param file_path: 存储文件的地址
+    :param market: 交易所代码
+    :param category: 0:期货 1：期权
+    :return: pd.DataFrame
+    """
+    assert category in [0, 1]
+    assert market in ['dce', 'czce', 'shfe', 'cffex']
+
+    get_exchange_hq_func = {'cffex': download_cffex_hq_by_date,
+                            'czce': download_czce_hq_by_date,
+                            'shfe': download_shfe_hq_by_date,
+                            'dce': download_dce_hq_by_date}
+
+    data = get_exchange_hq_func[market](date, category=category)
+    date_str = date.strftime('%Y%m%d')
+
+    if is_data_empty(data):
+        log.warning('{} {} data:{} is not downloaded! '.format(market, date_str, category))
+        # time.sleep(np.random.rand() * TIME_WAITING * 3)
+        return False
+
+    if market == 'czce':
+        data.to_csv(file_path, encoding='gb2312')
+    else:
+        file_path.write_text(data)
+
+    return True
+
+
+def download_hq_by_dates(market, category=0):
     """
     根据日期连续下载交易所日交易数据
     :param market:
@@ -188,63 +222,32 @@ def get_hq_by_dates(market, category=0):
     if file_index.empty:
         return False
 
-    get_exchange_hq_func = {'cffex': get_cffex_hq_by_date,
-                            'czce': get_czce_hq_by_date,
-                            'shfe': get_shfe_hq_by_date,
-                            'dce': get_dce_hq_by_date}
-
     for dt in file_index:
         print('{} downloading {} {} hq:{} data!'.format(
             datetime.now().strftime('%H:%M:%S'), market, dt.strftime('%Y-%m-%d'), category))
-        data = get_exchange_hq_func[market](dt, category=category)
         date_str = dt.strftime('%Y%m%d')
         file_path = target / '{}.day'.format(date_str)
-
-        if is_data_empty(data):
-            log.warning('{} {} data:{} is not downloaded! '.format(market, date_str, category))
-            time.sleep(np.random.rand() * TIME_WAITING * 3)
-            continue
-
-        if market == 'czce':
-            data.to_csv(file_path, encoding='gb2312')
-        else:
-            file_path.write_text(data)
-        time.sleep(np.random.rand() * TIME_WAITING)
+        download_hq_by_date(dt, file_path, market, category)
+        # time.sleep(np.random.rand() * TIME_WAITING)
     return True
 
 
-def reload_hq_by_date(date, filepath, market='dce', category=0):
+def split_symbol(pattern, df):
     """
-    从交易所网站获取某天的所有行情数据，存盘并返回pd.DataFrame
-    :param date: 需要数据的日期
-    :param filepath: 存储文件的地址
-    :param market: 交易所代码
-    :param category: 0:期货 1：期权
-    :return: pd.DataFrame
+    对合约代码分析，并用正则表达式进行提取
+    :param pattern: 正则表达式
+    :param df: 行情数据，包含'symbol columns'
+    :return:
+        pd.Series, idx 提取出信息对应的索引bool值
     """
-    assert category in [0, 1]
-    if market == 'dce':
-        text = get_dce_hq_by_date(date, category=category)
-        filepath.write_text(text)
-        return pd.read_csv(filepath, encoding='gb2312', header=0, index_col=False,
-                           sep='\s+', thousands=',').dropna()
-    elif market == 'shfe':
-        text = get_shfe_hq_by_date(date, category=category)
-        filepath.write_text(text)
-        return pd.DataFrame(json.loads(filepath.read_text())['o_curinstrument'])
-    elif market == 'czce':
-        hq_df = get_czce_hq_by_date(date, category=category)
-    elif market == 'cffex':
-        hq_df = get_cffex_hq_by_date(date, category=category)
-    else:
-        log.info('Wrong exchange market name!')
-        return pd.DataFrame()
-    if hq_df.empty:
-        log.warning('{} instrument type {} data is still not exist!'.format(market, category))
-    else:
-        hq_df.to_csv(filepath, encoding='gb2312')
-        print('Reload {} instrument type {} data successful!'.format(market, category))
-    return hq_df
+    split_s = df['symbol'].transform(lambda x: re.search(pattern, x))
+    idx = [True]
+    if split_s.isna().any():
+        idx = ~split_s.isna().values
+        split_s = split_s.dropna()
+        log.warning(
+            "{} instrument type:{} data {} has Nan in re search!".format(market, category, file_path.name))
+    return split_s, idx
 
 
 def transfer_exchange_data(file_row, market='dce', category=0):
@@ -257,6 +260,8 @@ def transfer_exchange_data(file_row, market='dce', category=0):
     """
     assert category in [0, 1]
     assert market in ['dce', 'czce', 'shfe', 'cffex']
+
+    ret = pd.DataFrame()
 
     file_path = file_row.filepath
     date = file_row.Index
@@ -276,26 +281,22 @@ def transfer_exchange_data(file_row, market='dce', category=0):
     # 读取需转换的原始数据文件
     if market == 'dce':  # text
         hq_df = pd.read_csv(file_path, encoding='gb2312', header=0, index_col=False,
-                            sep='\s+', thousands=',').dropna()
+                            sep='\s+', thousands=',')
     elif market == 'shfe':  # json
         hq_df = pd.DataFrame(json.loads(file_path.read_text())['o_curinstrument'])
     else:
         hq_df = pd.read_csv(file_path, encoding='gb2312', header=0, index_col=False)
 
     bflag = hq_df.empty or len(hq_df.columns) < len(columns) or len(hq_df.columns) > 20
-    if bflag:  # 原始数据文件为null，重新下载一次数据文件
-        print('{} instrument type:{} {} hq data is not exist, reload it!'.
+    if bflag:  # 原始数据文件为null，不重新下载，需要再运行一次程序
+        print('{} instrument type:{} {} hq data is not exist, please rerun program!'.
               format(market, category, file_row.filepath.name))
-        hq_df = reload_hq_by_date(date, file_path, market=market, category=category)
-        bflag = hq_df.empty or len(hq_df.columns) < len(columns) or len(hq_df.columns) > 20
-        if bflag:
-            return hq_df
+        return ret
 
     # 截取所需字段，并将字段名转换为统一标准
-    # hq_df = hq_df[cols_df[market].values]
-    hq_df = hq_df.dropna()
     hq_df = hq_df[columns]
     hq_df.columns = names
+    hq_df = hq_df.dropna()
 
     # 处理上海市场的空格和多余行
     if market == 'shfe':
@@ -313,27 +314,40 @@ def transfer_exchange_data(file_row, market='dce', category=0):
             hq_df = hq_df.join(code2name_table, on='commodity')
             del hq_df['commodity']
         elif market in ['czce', 'cffex']:
-            hq_df['code'] = hq_df['symbol'].apply(lambda x: re.search('^[a-zA-Z]{1,2}', x)[0])
+            split_re, index = split_symbol('^[a-zA-Z]{1,2}', hq_df)
+            hq_df = hq_df if all(index) else hq_df[index]
+            hq_df['code'] = split_re.transform(lambda x: x[0])
         else:
             log.info('Wrong exchange market name!')
-            return pd.DataFrame()
+            return ret
 
         # 提取交割月份
         def convert_deliver(x):
             if not isinstance(x, str):
                 x = str(x).strip()
             m = re.search('\d{3,4}$', x.strip())[0]
-            return m if len(m) == 4 else '0{}'.format(m)
+            if len(m) == 4:
+                return m
 
-        if market in ['dce', 'czce']:  # cffex symbol不需要转换
-            hq_df['symbol'] = hq_df['code'] + hq_df['symbol'].apply(convert_deliver)
+            if m[0] == '0':
+                y = date.year
+                y = int(y - np.floor(y / 100) * 100 + 1)
+                m = str(y) + m[-2:]
+            else:
+                m = date.strftime('%y')[0] + m
+
+            return m
+
+        if market in ['dce', 'czce', 'shfe']:  # cffex symbol不需要转换
+            hq_df['symbol'] = hq_df['code'] + hq_df['symbol'].transform(convert_deliver)
 
     else:  # category = 1 期权
         hq_df.loc[:, 'symbol'] = hq_df['symbol'].str.upper() \
             .str.replace('-', '').str.strip()
-        split_re = hq_df['symbol'].transform(
-            lambda x: re.search('^([A-Z]{1,2})(\d{3,4})-?([A-Z])-?(\d+)', x))
-        assert split_re is not None
+
+        split_re, index = split_symbol('^([A-Z]{1,2})(\d{3,4})-?([A-Z])-?(\d+)', hq_df)
+        hq_df = hq_df if all(index) else hq_df[index]
+
         hq_df['code'] = split_re.transform(lambda x: x[1])
         hq_df['future_symbol'] = split_re.transform(
             lambda x: x[1] + (x[2] if len(x[2]) == 4 else '0{}'.format(x[2])))
@@ -375,44 +389,147 @@ def insert_hq_to_mongo():
 
     conn = connect_mongo(db='quote')
 
-    # 首先尝试下载数据
     for c in category:
         t = INSTRUMENT_TYPE[c]
         cursor = conn[t]
         for m in market:
-            # get_hq_by_dates(m, c)
+            if m == 'cffex' and c == 1:
+                print("cffex has no option trading.")
+                break
+            # 下载更新行情的原始数据
+            download_hq_by_dates(m, c)
 
+            # 需要导入数据库的原始数据文件
             file_df = get_insert_mongo_files(m, c)
 
             if file_df.empty:
-                print('{} instrument type:{} is updated before!'.format(m, t))
+                print('{} {} hq is updated before!'.format(m, t))
                 continue
 
             for row in file_df.itertuples():
                 df = transfer_exchange_data(row, m, c)
                 if df.empty:
+                    log.error("Transform {} {} {}data failure, please check program.".format(m, t, row.Index))
                     continue
                 result = cursor.insert_many(df.to_dict('records'))
-                if result is False:
-                    print('{} {} {} insert failure.'.format(m, t, row.filepath.name))
-                else:
+                if result:
                     print('{} {} {} insert success.'.format(m, t, row.filepath.name))
-            print('{} instrument type:{} is updated now!'.format(m, t))
+                else:
+                    print('{} {} {} insert failure.'.format(m, t, row.filepath.name))
+            print('{} {} hq is updated now!'.format(m, t))
+
+
+def build_future_index():
+    """
+    编制指数数据：期货加权指数，主力合约指数，远月主力合约，交割主力合约
+    按成交量对同一天的交易合约进行排序，取排名前三的交易合约，成交量最大的为主力合约
+    最接近当月的合约为交割主力合约，在主力合约后交割的为远月主力合约
+    :return:
+    """
+    # 更新数据库行情数据
+    insert_hq_to_mongo()
+
+    # 连接数据库
+    conn = connect_mongo(db='quote')
+
+    index_cursor = conn['index']
+    hq_cursor = conn['future']
+
+    # 从 future collection中提取交易的品种
+    codes = hq_cursor.distinct('code')
+    if not isinstance(codes, list) or len(codes) == 0:
+        print("Don't find any trading code in future collection!")
+        return
+
+    # 按品种分别编制指数
+    for code in codes:
+        # 获取指数数据最近的一条记录
+        last_doc = index_cursor.find_one({'code': 'CU'}, sort=[('datetime', -1)])
+
+        if last_doc:
+            filter_dict = {'code': code, 'datetime': {'$gte': last_doc['datetime']}}
+        else:  # 测试指定日期
+            filter_dict = {'code': code, 'datetime': {'$gte': datetime(2018, 10, 1)}}
+
+        # 从数据库读取所需数据
+        hq = hq_cursor.find(filter_dict)
+        hq_df = pd.DataFrame(list(hq))
+        if hq_df.empty:
+            continue
+
+        # 按 grouped.groups 循环处理
+        grouped = hq_df.groupby('datetime')
+
+        # 主力合约，按成交量选取前3个合约
+        x = grouped['openInt']
+        y = x.nlargest(3)
+        index = y.index.get_level_values(1)
+        vol_3rd_df = hq_df.iloc[index]
+
+        domain_df = vol_3rd_df.iloc[::3]
+
+        # 最近合约 确保数据库中数据按合约升序排列，否则按交割月份取最小值
+        hq_df = grouped.first()
+
+    ret = pd.DataFrame()
+
+    code = code.upper()
+
+    if isinstance(code, str):
+        filter_dict = {'code': code}
+    elif isinstance(code, list):
+        filter_dict = {'code': {'$in': code}}
+    elif code == '':
+        filter_dict = {}
+    else:
+        print('Wrong code!')
+        return ret
+
+    # if start or end:
+    #     filter_dict['datetime'] = {}
+    #     if start:
+    #         filter_dict['datetime']['$gte'] = start
+    #     if end:
+    #         filter_dict['datetime']['$lte'] = end
+
+    df = read_mongo('quote', 'future', query=filter_dict)
+
+    if df.empty:
+        print('No hq data in database, please check params.')
+        return ret
+
+    #
+
+    # 按 code 分离数据
+    code_groups = df.groupby('code').groups
+
+    # code_groups =
+    # 按 datetime 组织数据
+    # 按 grouped.groups 循环处理
+    grouped = df.groupby('datetime')
+    # 最近合约 确保数据库中数据按合约升序排列，否则按交割月份取最小值
+    hq_df = grouped.first()
+
+    # 主力合约，按成交量最大选取
+    x = grouped['volume']
+    y = x.nlargest(1)
+    index = y.index.get_level_values(1)
+    hq_df = df.iloc[index]
+
+    return ret
 
 
 if __name__ == '__main__':
     # start_dt = datetime(2014, 12, 21)
     # end_dt = datetime(2005, 1, 4)
     print(datetime.now())
-    # get_czce_hq_by_date(end_dt)
+    # download_czce_hq_by_date(end_dt)
     # get_dce_hq_by_dates(category=0)
-    # get_hq_by_dates('cffex', category=0)
+    # download_hq_by_dates('cffex', category=0)
     # get_cffex_hq_by_dates(category=0)
     # construct_dce_hq(end=end_dt, category=0)
     # df = pd.read_csv(file_path, encoding='gb2312', sep='\s+')
     # df = get_future_hq('M', start=start_dt, end=None)
-    from pathlib import Path
-    from collections import namedtuple
 
     # date = datetime(2018, 10, 25)
     # filepath = Path(
@@ -422,5 +539,6 @@ if __name__ == '__main__':
     # row = Pandas(Index=date, filepath=filepath)
     # df = transfer_exchange_data(row, market='shfe', category=1)
     # result = to_mongo('quote', 'option', df.to_dict('records'))
-    insert_hq_to_mongo()
-    print(datetime.now())
+    # insert_hq_to_mongo()
+    build_future_index()
+    # print(datetime.now())

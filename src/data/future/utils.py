@@ -1,20 +1,21 @@
 # -*- coding: utf-8 -*-
 import re
+from datetime import datetime, timedelta
 
 import pandas as pd
 
-from src.data.setting import DATE_PATTERN, INSTRUMENT_TYPE, TRADE_BEGIN_DATE, RAW_HQ_DIR
+from src.data.setting import DATE_PATTERN, INSTRUMENT_TYPE, RAW_HQ_DIR
+from src.data.tdx import get_future_hq
 from src.data.util import connect_mongo
 from src.log import LogHandler
-from src.data.tdx import get_future_hq
 
 log = LogHandler('future.log')
 
 
 # 期货历史交易日历，返回铜期货指数交易日期，2000/1/4开始
 def get_future_calender(start=None, end=None):
-    if start > datetime.today():
-        return pd.DatetimeIndex()
+    # if start > datetime.today():
+    #     return pd.DatetimeIndex(freq='1D')
     df = get_future_hq('cuL9', start=start, end=end)
     if df is None:
         df = get_future_hq('cuL9', start=start)
@@ -28,12 +29,18 @@ def get_download_file_index(market, category):
     :param category:
     :return: pandas.core.indexes.datetimes.DatetimeIndex 日期的索引值
     """
-    start = TRADE_BEGIN_DATE[market][category]
-
+    # start = TRADE_BEGIN_DATE[market][category]
+    start = datetime(2019, 1, 1)   # 数据已经确定下载不再需要比对
     ret = pd.to_datetime([])
 
     try:
-        trade_index = get_future_calender(start=start)
+        # 当天 5点后才下载当天数据
+        today = datetime.today()
+        year, month, day = today.year, today.month, today.day
+        if datetime.now() > datetime(year, month, day, 16, 30):
+            trade_index = get_future_calender(start=start)
+        else:
+            trade_index = get_future_calender(start=start, end=today-timedelta(1))
     except AttributeError:
         log.info('From {} to today are not in trading calender!'.format(start))
         return ret
