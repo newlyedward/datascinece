@@ -13,7 +13,14 @@ log = LogHandler('future.log')
 
 
 # 期货历史交易日历，返回铜期货指数交易日期，2000/1/4开始
-def get_future_calender(start=None, end=None):
+def get_future_calender(start=None, end=None, country='cn'):
+    """
+
+    :param start:
+    :param end:
+    :param country: 默认是中国市场('cn')，目前仅支持中国市场
+    :return: pd.Index
+    """
     # if start > datetime.today():
     #     return pd.DatetimeIndex(freq='1D')
     df = get_future_hq('cuL9', start=start, end=end)
@@ -22,15 +29,16 @@ def get_future_calender(start=None, end=None):
     return df.index
 
 
-def get_download_file_index(market, category):
+def get_download_file_index(market, category, start=datetime(2019, 1, 1)):
     """
     计算需要下载的文件
+    :param start:    从某个交易日开始下载数据
     :param market:
     :param category:
     :return: pandas.core.indexes.datetimes.DatetimeIndex 日期的索引值
     """
     # start = TRADE_BEGIN_DATE[market][category]
-    start = datetime(2019, 1, 1)   # 数据已经确定下载不再需要比对
+    # start = datetime(2019, 1, 1)   # 数据已经确定下载不再需要比对
     ret = pd.to_datetime([])
 
     try:
@@ -40,7 +48,7 @@ def get_download_file_index(market, category):
         if datetime.now() > datetime(year, month, day, 16, 30):
             trade_index = get_future_calender(start=start)
         else:
-            trade_index = get_future_calender(start=start, end=today-timedelta(1))
+            trade_index = get_future_calender(start=start, end=today - timedelta(1))
     except AttributeError:
         log.info('From {} to today are not in trading calender!'.format(start))
         return ret
@@ -70,6 +78,7 @@ def get_insert_mongo_files(market, category):
     conn = connect_mongo(db='quote')
     cursor = conn[INSTRUMENT_TYPE[category]]
 
+    # TODO 是否需要维护一个装门的数据list
     date_index = cursor.distinct('datetime', {'market': market})
 
     file_df = get_exist_files(market, category)

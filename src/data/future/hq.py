@@ -246,7 +246,7 @@ def split_symbol(pattern, df):
         idx = ~split_s.isna().values
         split_s = split_s.dropna()
         log.warning(
-            "{} instrument type:{} data {} has Nan in re search!".format(market, category, file_path.name))
+            "There are some Nan in re search!")
     return split_s, idx
 
 
@@ -419,15 +419,37 @@ def insert_hq_to_mongo():
             print('{} {} hq is updated now!'.format(m, t))
 
 
+def build_weighted_index(hq_df, weight='volume'):
+    """
+    对行情数据求加权指数
+    :param hq_df: pd.MultiIndex(datetime symbol)
+    :param weight: str 权重指标 'volume', 'openInt'
+    :return: hq_df 剔除了symbol字段或者索引
+    """
+    df = hq_df.copy()
+    columns = ['open', 'high', 'low', 'close']
+
+    for column in columns:
+        df[column] = df[column] * df[weight]
+
+    df = df.sum(level=0)
+
+    for column in columns:
+        df[column] = df[column] / df[weight]
+
+    return df
+
+
 def build_future_index():
     """
     编制指数数据：期货加权指数，主力合约指数，远月主力合约，交割主力合约
+    对应的symbol-xx00:持仓量加权，xx11：成交量加权，xx88：主力合约，x99：远月合约，xx77:交割月合约
     按成交量对同一天的交易合约进行排序，取排名前三的交易合约，成交量最大的为主力合约
     最接近当月的合约为交割主力合约，在主力合约后交割的为远月主力合约
     :return:
     """
     # 更新数据库行情数据
-    insert_hq_to_mongo()
+    # insert_hq_to_mongo()
 
     # 连接数据库
     conn = connect_mongo(db='quote')
@@ -443,8 +465,8 @@ def build_future_index():
 
     # 按品种分别编制指数
     for code in codes:
-        # 获取指数数据最近的一条记录
-        last_doc = index_cursor.find_one({'code': 'CU'}, sort=[('datetime', -1)])
+        # 获取指数数据最近的一条记录的前一条记录，判断依据是前一天的持仓量
+        last_doc = index_cursor.find_one({'code': 'CU'}, sort=[('datetime', -1)], skip=2)
 
         if last_doc:
             filter_dict = {'code': code, 'datetime': {'$gte': last_doc['datetime']}}
@@ -452,71 +474,67 @@ def build_future_index():
             filter_dict = {'code': code, 'datetime': {'$gte': datetime(2018, 10, 1)}}
 
         # 从数据库读取所需数据
-        hq = hq_cursor.find(filter_dict)
+        hq = hq_cursor.find(filter_dict, {'_id': 0})
         hq_df = pd.DataFrame(list(hq))
         if hq_df.empty:
+            print('{} index data have been updated before!'.format(code))
             continue
 
-        # 按 grouped.groups 循环处理
-        grouped = hq_df.groupby('datetime')
+        # hq_df['month'] = hq_df['symbol'].str[-2:]
+        hq_df.set_index(['datetime', 'symbol'], inplace=True)
+        # index = hq_df.index
+        # columns = hq_df.columns
 
-        # 主力合约，按成交量选取前3个合约
-        x = grouped['openInt']
-        y = x.nlargest(3)
-        index = y.index.get_level_values(1)
-        vol_3rd_df = hq_df.iloc[index]
+        date_index = hq_df.index.levels[0]
+        index_names = ['domain', 'near', 'next']
+        contract_df = pd.DataFrame(index=date_index, columns=index_names)
 
-        domain_df = vol_3rd_df.iloc[::3]
+        for date in date_index:
+            s = hq_df.loc[date, 'openInt'].copy()
+            s.sort_values(ascending=False, inplace=True)
+            s = s[:3]
+            domain = s.index[0]
+            contract_df.loc[date, 'domain'] = domain
+            s.sort_index(inplace=True)
+            contract_df.loc[date, 'near'] = s.index[0]
+            idx = s.index.get_loc(domain) + 1
+            contract_df.loc[date, 'next'] = s.index[idx]
 
-        # 最近合约 确保数据库中数据按合约升序排列，否则按交割月份取最小值
-        hq_df = grouped.first()
+        contract_df = contract_df.shift(1).dropna()
+        # length = len(contract_df)
+        contract_df.reset_index(inplace=True)
+        hq_df = hq_df.loc[contract_df.datetime[0]:]  # 期货指数数据从第二个交易日开始
 
-    ret = pd.DataFrame()
+        frames = []
 
-    code = code.upper()
+        index_symbol = [code + x for x in ['00', '11', '88', '77', '99']]
+        multi_index_names = ['datetime', 'symbol']
+        # 主力，交割，远月合约数据
+        for name, symbol in zip(index_names, index_symbol[-3:]):
 
-    if isinstance(code, str):
-        filter_dict = {'code': code}
-    elif isinstance(code, list):
-        filter_dict = {'code': {'$in': code}}
-    elif code == '':
-        filter_dict = {}
-    else:
-        print('Wrong code!')
-        return ret
+            multi_index = pd.MultiIndex.from_frame(
+                contract_df[['datetime', name]], names=multi_index_names)
+            index_df = hq_df.loc[multi_index]
+            index_df.reset_index(inplace=True)
+            index_df['contract'] = index_df['symbol']
+            index_df['symbol'] = symbol
+            frames += index_df.to_dict('records')
 
-    # if start or end:
-    #     filter_dict['datetime'] = {}
-    #     if start:
-    #         filter_dict['datetime']['$gte'] = start
-    #     if end:
-    #         filter_dict['datetime']['$lte'] = end
+        # 加权指数
+        for symbol, weight_name in zip(index_symbol[:2], ['openInt', 'volume']):
+            index_df = build_weighted_index(hq_df, weight=weight_name)
+            index_df.reset_index(inplace=True)
+            index_df['code'] = code
+            index_df['market'] = hq_df.market[0]
+            index_df['symbol'] = symbol
+            frames += index_df.to_dict('records')
 
-    df = read_mongo('quote', 'future', query=filter_dict)
+        result = index_cursor.insert_many(frames)
+        if result:
+            print('{} index data insert success.'.format(code))
+        else:
+            print('{} index data insert failure.'.format(code))
 
-    if df.empty:
-        print('No hq data in database, please check params.')
-        return ret
-
-    #
-
-    # 按 code 分离数据
-    code_groups = df.groupby('code').groups
-
-    # code_groups =
-    # 按 datetime 组织数据
-    # 按 grouped.groups 循环处理
-    grouped = df.groupby('datetime')
-    # 最近合约 确保数据库中数据按合约升序排列，否则按交割月份取最小值
-    hq_df = grouped.first()
-
-    # 主力合约，按成交量最大选取
-    x = grouped['volume']
-    y = x.nlargest(1)
-    index = y.index.get_level_values(1)
-    hq_df = df.iloc[index]
-
-    return ret
 
 
 if __name__ == '__main__':

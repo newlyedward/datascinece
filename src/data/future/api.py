@@ -1,4 +1,10 @@
 # -*- coding: utf-8 -*-
+import pandas as pd
+
+from src.data.hq import get_previous_trading_date
+from src.data.util import connect_mongo
+
+
 def get_price(symbol, start_date=None, end_date=None, frequency='1d', fields=None):
     """
         合约代码，symbol, symbol list。获取tick数据时，只支持单个symbol
@@ -29,7 +35,33 @@ def get_dominant(code, start_date=None, end_date=None, rule=0):
                                             主力合约的选取只考虑最大昨仓这个条件。
     :return:
     """
-    pass
+    # 连接数据库
+    conn = connect_mongo(db='quote')
+
+    hq_cursor = conn['future']
+
+    filter_dict = {'code': code}
+
+    if start_date is not None:  # 使用前一个交易日
+        filter_dict['datetime'] = {'$gte': get_previous_trading_date(start_date)}
+
+    if end_date is not None:
+        if 'datetime' in filter_dict:
+            filter_dict['datetime']['$lte'] = end_date
+        else:
+            filter_dict['datetime'] = {'$lte': end_date}
+
+    hq = hq_cursor.find(filter_dict, {'datetime': 1, 'symbol': 1, 'openInt': 1})
+
+    hq_df = pd.DataFrame(list(hq))
+    if hq_df.empty:
+        return hq_df
+
+    grouped = hq_df.groupby('datetime')
+    x = grouped['openInt']
+    y = x.nlargest(1)
+    index = y.index.get_level_values(1)
+    domain_df = hq_df.iloc[index]
 
 
 def get_contracts(code, date=None):
