@@ -449,7 +449,7 @@ def build_future_index():
     :return:
     """
     # 更新数据库行情数据
-    # insert_hq_to_mongo()
+    insert_hq_to_mongo()
 
     # 连接数据库
     conn = connect_mongo(db='quote')
@@ -463,15 +463,30 @@ def build_future_index():
         print("Don't find any trading code in future collection!")
         return
 
-    # 按品种分别编制指数
+    # 按品种分别编制指数  已经停止交易品种 ['GN', 'WS', 'WT', 'RO', 'ER', 'ME', 'TC']
     for code in codes:
-        # 获取指数数据最近的一条记录的前一条记录，判断依据是前一天的持仓量
-        last_doc = index_cursor.find_one({'code': 'CU'}, sort=[('datetime', -1)], skip=2)
+        # 获取指数数据最近的一条主力合约记录的前一条记录，判断依据是前一天的持仓量
+        last_doc = index_cursor.find_one({'symbol': code+'88'}, sort=[('datetime', -1)])
 
         if last_doc:
             filter_dict = {'code': code, 'datetime': {'$gte': last_doc['datetime']}}
+            #       老合约     新合约      老合约最后交易日
+            # 甲醇   ME/50吨   MA/10吨       2015-5-15
+            # 动力煤 TC/200吨  ZC/100吨      2016-4-8
+            # 强筋小麦 WS/10吨  WH/20吨      2013-05-23
+            # 硬白小麦 WT/10吨  PM/50吨      2012-11-22
+            # 早籼稻  ER/10吨   RI/20吨      2013-5-23
+            # 绿豆    GN                    2010-3-23
+            # 菜籽油   RO/5吨   OI/10吨      2013-5-15
+            if code in ['GN', 'WS', 'WT', 'RO', 'ER', 'ME', 'TC']:
+                print('{} is the {} last trading day.'.format(last_doc['datetime'].strftime('%Y-%m-%d'), code))
+                continue
+            else:
+                print("Build {} future index from {}".format(code, last_doc['datetime']))
         else:  # 测试指定日期
-            filter_dict = {'code': code, 'datetime': {'$gte': datetime(2018, 10, 1)}}
+            # filter_dict = {'code': code, 'datetime': {'$lte': datetime(2003, 1, 1)}}
+            filter_dict = {'code': code}
+            print("Build {} future index from trade beginning.".format(code))
 
         # 从数据库读取所需数据
         hq = hq_cursor.find(filter_dict, {'_id': 0})
@@ -480,30 +495,40 @@ def build_future_index():
             print('{} index data have been updated before!'.format(code))
             continue
 
-        # hq_df['month'] = hq_df['symbol'].str[-2:]
         hq_df.set_index(['datetime', 'symbol'], inplace=True)
-        # index = hq_df.index
-        # columns = hq_df.columns
 
         date_index = hq_df.index.levels[0]
+        if len(date_index) < 2:   # 新的数据
+            print('{} index data have been updated before!'.format(code))
+            continue
+
         index_names = ['domain', 'near', 'next']
         contract_df = pd.DataFrame(index=date_index, columns=index_names)
 
+        if code == 'WS':
+            print('waiting')
+
         for date in date_index:
+            # TODO WS 有问题
+            # hq.py:493: PerformanceWarning: indexing past lexsort depth may impact performance.
+            #   s = hq_df.loc[date, 'openInt'].copy()
             s = hq_df.loc[date, 'openInt'].copy()
             s.sort_values(ascending=False, inplace=True)
-            s = s[:3]
+            s = s[:min(3, len(s))]          # 预防合约小于3的情况,避免出现交割月和主力合约重合，主力合约和下月合约重合
             domain = s.index[0]
             contract_df.loc[date, 'domain'] = domain
             s.sort_index(inplace=True)
             contract_df.loc[date, 'near'] = s.index[0]
             idx = s.index.get_loc(domain) + 1
+            if idx >= len(s):     # 远月合约持仓较少，不会存在换月情况，只会和交割月合约交换
+                log.debug('{}:{} Far month openInt is few.'.format(code, date.strftime('%Y-%m-%d')))
+                idx = len(s) - 1
             contract_df.loc[date, 'next'] = s.index[idx]
 
-        contract_df = contract_df.shift(1).dropna()
+        pre_contract_df = contract_df.shift(1).dropna()
         # length = len(contract_df)
-        contract_df.reset_index(inplace=True)
-        hq_df = hq_df.loc[contract_df.datetime[0]:]  # 期货指数数据从第二个交易日开始
+        pre_no_index_df = pre_contract_df.reset_index()
+        hq_df = hq_df.loc[pre_no_index_df.datetime[0]:]  # 期货指数数据从第二个交易日开始
 
         frames = []
 
@@ -513,7 +538,18 @@ def build_future_index():
         for name, symbol in zip(index_names, index_symbol[-3:]):
 
             multi_index = pd.MultiIndex.from_frame(
-                contract_df[['datetime', name]], names=multi_index_names)
+                pre_no_index_df[['datetime', name]], names=multi_index_names)
+            index_diff = multi_index.difference(hq_df.index)
+
+            # 头一天还有交割仓位，第二天合约消失的情况
+            if not index_diff.empty:
+                date_index = index_diff.get_level_values(level=0)
+                pre_contract_df.loc[date_index, name] = contract_df.loc[date_index, name]
+                pre_no_index_df = pre_contract_df.reset_index()
+                multi_index = pd.MultiIndex.from_frame(
+                    pre_no_index_df[['datetime', name]], names=multi_index_names)
+                print('{} use {} current day contract'.format(symbol, len(index_diff)))
+
             index_df = hq_df.loc[multi_index]
             index_df.reset_index(inplace=True)
             index_df['contract'] = index_df['symbol']
@@ -534,7 +570,6 @@ def build_future_index():
             print('{} index data insert success.'.format(code))
         else:
             print('{} index data insert failure.'.format(code))
-
 
 
 if __name__ == '__main__':
@@ -559,4 +594,4 @@ if __name__ == '__main__':
     # result = to_mongo('quote', 'option', df.to_dict('records'))
     # insert_hq_to_mongo()
     build_future_index()
-    # print(datetime.now())
+    print(datetime.now())
