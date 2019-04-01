@@ -7,7 +7,7 @@ import pandas as pd
 from src.data.setting import DATE_PATTERN, INSTRUMENT_TYPE, RAW_HQ_DIR
 from src.data.tdx import get_future_hq
 from src.data.util import connect_mongo
-from src.log import LogHandler
+from log import LogHandler
 
 log = LogHandler('future.log')
 

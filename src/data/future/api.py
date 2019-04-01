@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
 import pandas as pd
 
-from src.data.hq import get_previous_trading_date
+from datetime import datetime
+
 from src.data.util import connect_mongo
 
 
-def get_price(symbol, start_date=None, end_date=None, frequency='1d', fields=None):
+def get_price(symbol, instrument='index', start_date=None, end_date=None, frequency='1d', fields=None):
     """
-        合约代码，symbol, symbol list。获取tick数据时，只支持单个symbol
-    :param symbol:
+        获取行情数据
+    :param symbol: 合约代码，symbol, symbol list, 只支持同种类。获取tick数据时，只支持单个symbol
+    :param instrument:   行情数据类型 ['future', 'option', 'stock', 'bond', 'convertible'] 以及 index
     :param start_date:
     :param end_date:    结束日期，交易使用时，默认为策略当前日期前一天
     :param frequency:   历史数据的频率, 默认为'd', 只支持日线级别以上数据。'5m'代表5分钟线。可支持期货tick级别数据获取，此时频率为'tick'
@@ -17,33 +19,39 @@ def get_price(symbol, start_date=None, end_date=None, frequency='1d', fields=Non
         传入一个symbol，多个fields，函数会返回一个pandas DataFrame
         传入一个symbol，一个field，函数会返回pandas Series
         传入多个symbol，一个field，函数会返回一个pandas DataFrame
-        传入多个symbol，函数会返回一个pandas Panel
-    """
-    pass
-
-
-def get_dominant(code, start_date=None, end_date=None, rule=0):
-    """
-    获取某一期货品种一段时间的主力合约列表。合约首次上市时，以当日收盘同品种持仓量最大者作为从第二个交易日开始的主力合约。
-    当同品种其他合约持仓量在收盘后超过当前主力合约1.1倍时，从第二个交易日开始进行主力合约的切换。日内不会进行主力合约的切换。
-
-    :param code:                            期货合约品种，例如沪深300股指期货为'IF'
-    :param start_date:  datetime.datetime   开始日期，默认为期货品种最早上市日期后一交易日
-    :param end_date:                        结束日期，默认为当前日期
-    :param rule:                            默认是rule=0,采用最大昨仓为当日主力合约，每个合约只能做一次主力合约，
-                                            不会重复出现。针对股指期货，只在当月和次月选择主力合约。当rule=1时，
-                                            主力合约的选取只考虑最大昨仓这个条件。
-    :return:
+        传入多个symbol，函数会返回一个multiIndexe DataFrame
     """
     # 连接数据库
     conn = connect_mongo(db='quote')
 
-    hq_cursor = conn['future']
+    cursor = conn[instrument]
 
-    filter_dict = {'code': code}
+    filter_dict = {}
+    filter_dict['symbol']
+
+    pass
+
+
+def get_dominant(code, start_date=None, end_date=None):
+    """
+    获取某一期货品种一段时间的主力合约列表。合约首次上市时，以当日收盘同品种持仓量最大者作为从第二个交易日开始的主力合约。
+    当同品种其他合约持仓量在收盘后超过当前主力合约时，从第二个交易日开始进行主力合约的切换。日内不会进行主力合约的切换。
+
+    :param code:                            期货合约品种，例如沪深300股指期货为'IF'
+    :param start_date:  datetime.datetime   开始日期，默认为期货品种最早上市日期后一交易日
+    :param end_date:                        结束日期，默认为当前日期
+
+    :return: pd.DataFrame
+    """
+    # 连接数据库
+    conn = connect_mongo(db='quote')
+
+    cursor = conn['index']
+
+    filter_dict = {'code': code, 'symbol': code+'99'}
 
     if start_date is not None:  # 使用前一个交易日
-        filter_dict['datetime'] = {'$gte': get_previous_trading_date(start_date)}
+        filter_dict['datetime'] = {'$gte': start_date}
 
     if end_date is not None:
         if 'datetime' in filter_dict:
@@ -51,17 +59,13 @@ def get_dominant(code, start_date=None, end_date=None, rule=0):
         else:
             filter_dict['datetime'] = {'$lte': end_date}
 
-    hq = hq_cursor.find(filter_dict, {'datetime': 1, 'symbol': 1, 'openInt': 1})
+    contract = cursor.find(filter_dict, {'_id': 0, 'datetime': 1, 'contract': 1})
 
-    hq_df = pd.DataFrame(list(hq))
-    if hq_df.empty:
-        return hq_df
+    contract_df = pd.DataFrame(list(contract))
 
-    grouped = hq_df.groupby('datetime')
-    x = grouped['openInt']
-    y = x.nlargest(1)
-    index = y.index.get_level_values(1)
-    domain_df = hq_df.iloc[index]
+    contract_df.set_index('datetime', inplace=True)
+
+    return contract_df
 
 
 def get_contracts(code, date=None):
@@ -70,9 +74,21 @@ def get_contracts(code, date=None):
     按照到期月份，下标从小到大排列，返回列表中第一个合约对应的就是该品种的近月合约。
     :param code:   期货合约品种，例如沪深300股指期货为'IF'
     :param date:   datetime.datetime 查询日期，默认为当日
-    :return:
+    :return: list
     """
-    pass
+    # 连接数据库
+    conn = connect_mongo(db='quote')
+
+    cursor = conn['future']
+
+    if date is None:
+        date = datetime.today()
+
+    filter_dict = {'code': code, 'datetime': date}
+
+    contract = cursor.find(filter_dict, {'_id': 0, 'symbol': 1})
+
+    return pd.DataFrame(list(contract))
 
 
 def get_member_rank(symbol, trading_date, rank_by):
@@ -104,3 +120,13 @@ def get_warehouse_stocks(code, start_date=None, end_date=None):
             market      期货品种对应交易所
     """
 
+
+if __name__ == '__main__':
+    start = datetime(2019, 1, 1)
+    end = datetime(2019, 3, 1)
+    contracts = get_contracts('CU')
+    contracts = get_contracts('CU', end)
+    df = get_dominant('CU')
+    # df = get_dominant('CU', start_date=start)
+    # df = get_dominant('CU', start_date=start, end_date=end)
+    # df = get_dominant('CU', end_date=start)

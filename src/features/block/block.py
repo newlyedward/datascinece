@@ -4,7 +4,7 @@ block
 ~~~~~~~~~~~~
 This module contains the identification of peaks, segments and blocks.
 """
-from src.log import LogHandler
+from log import LogHandler
 # from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
@@ -28,6 +28,7 @@ class TsBlock:
         self.__peaks = dict.fromkeys(FREQ, pd.DataFrame())
         self.__segments = dict.fromkeys(FREQ, pd.DataFrame())
         self.__blocks = dict.fromkeys(FREQ, pd.DataFrame())
+        # 从数据库读取数据
 
     def get_peaks(self, start=None, end=None, freq='d'):
         """
@@ -472,7 +473,7 @@ def get_history_hq(code, start=None, end=None, freq='d'):
 
 
 if __name__ == "__main__":
-    from datetime import datetime, timedelta
+    from datetime import datetime
 
     # from src.features.block import TsBlock
 

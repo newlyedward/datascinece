@@ -1,5 +1,5 @@
 import pandas as pd
-from src.data.setting import RAW_DATA_DIR, PROCESSED_DATA_DIR, SRC_DATA_FUTURE
+from src.data.setting import RAW_DATA_DIR, SRC_DATA_FUTURE
 
 SPREAD_DIR = RAW_DATA_DIR / 'future/spread'
 INVENTORY_DIR = RAW_DATA_DIR / 'future/inventory'

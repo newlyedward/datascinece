@@ -10,7 +10,7 @@ from datetime import datetime
 import re
 
 from src.data.future.utils import get_future_calender
-from src.log import LogHandler
+from log import LogHandler
 from src.data.util import get_html_text
 from src.data.setting import RAW_DATA_DIR
 

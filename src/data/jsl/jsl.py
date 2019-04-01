@@ -6,7 +6,7 @@ import time
 import numpy as np
 import pandas as pd
 
-from src.log import LogHandler
+from log import LogHandler
 from src.data.util import get_html_tree, get_html_text, convert_percent
 from src.data.setting import RAW_DATA_DIR   # 不能使用相对路径 单文件运行时 import 错误
 from src.data.jsl.setting import *

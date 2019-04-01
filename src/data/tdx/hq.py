@@ -4,7 +4,7 @@ import datetime as dt
 import numpy as np
 import pandas as pd
 
-from src.log import LogHandler
+from log import LogHandler
 
 from src.data.tdx.setting import tdx_dir, MARKET2TDX_CODE, MARKET_DIR, PERIOD_DIR, PERIOD_EXT
 

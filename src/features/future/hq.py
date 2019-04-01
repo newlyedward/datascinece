@@ -2,9 +2,7 @@
 """
 跟行情数据有关的特征值
 """
-import pandas as pd
-from src.data.util import read_mongo
-from src.log import LogHandler
+from log import LogHandler
 
 log = LogHandler('feature.future.log')
 

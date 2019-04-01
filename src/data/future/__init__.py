@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from src.log import LogHandler
+from log import LogHandler
 from src.data.future.basic import get_spreads
 from src.data.future.utils import get_future_calender
 

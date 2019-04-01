@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import requests
 from lxml import etree
-from src.log import LogHandler
+from log import LogHandler
 
 log = LogHandler('util.crawler.log')
 

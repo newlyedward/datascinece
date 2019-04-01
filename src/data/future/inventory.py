@@ -8,7 +8,7 @@ import re
 
 from src.data.future.setting import INVENTORY_DIR
 from src.data.future.utils import get_future_calender
-from src.log import LogHandler
+from log import LogHandler
 from src.data.util import get_html_text
 
 log = LogHandler('future.log')

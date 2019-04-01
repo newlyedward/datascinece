@@ -2,8 +2,8 @@
 from pathlib import Path
 from datetime import datetime, timedelta
 
-MONGODB_URI = '192.168.2.88'
-MONGODB_PORT = 27017
+# MONGODB_URI = '192.168.2.88'
+# MONGODB_PORT = 27018
 
 INSTRUMENT_TYPE = ['future', 'option', 'stock', 'bond', 'convertible']
 

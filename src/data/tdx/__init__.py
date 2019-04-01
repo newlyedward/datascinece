@@ -2,7 +2,7 @@
 
 import datetime as dt
 
-from src.log import LogHandler
+from log import LogHandler
 
 from src.data.tdx.hq import get_future_day_hq, get_future_min_hq
 from src.data.tdx.basic import get_future_basic

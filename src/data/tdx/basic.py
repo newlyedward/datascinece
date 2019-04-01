@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import os
-from src.log import LogHandler
+from log import LogHandler
 import pandas as pd
 
 from .setting import tdx_dir

@@ -2,17 +2,16 @@
 import pandas as pd
 from pymongo import MongoClient
 
-from src.data.setting import MONGODB_URI, MONGODB_PORT
-from src.log import LogHandler
+from src.setting import MONGODB_URI, MONGODB_PORT, DATA_COLLECTOR, COLLECTOR_PWD, DATA_ANALYST, ANALYST_PWD
+from log import LogHandler
 
-log = LogHandler('db.log')
+log = LogHandler('data.log')
 
-# client = pymongo.MongoClient("mongodb+srv://unistar:<password>
-# @cluster0-y9smy.azure.mongodb.net/test?retryWrites=true")
+# client = MongoClient("mongodb+srv://unistar:<password>@cluster0-y9smy.mongodb.net/test?retryWrites=true")
 # db = client.test
 
 
-def connect_mongo(db, username='', password='', host=MONGODB_URI, port=MONGODB_PORT):
+def connect_mongo(db, username=DATA_COLLECTOR, password=COLLECTOR_PWD, host=MONGODB_URI, port=MONGODB_PORT):
     """ A util for making a connection to mongo """
 
     if username and password:
@@ -24,7 +23,8 @@ def connect_mongo(db, username='', password='', host=MONGODB_URI, port=MONGODB_P
     return conn[db]
 
 
-def read_mongo(database, collection, query={}, host=MONGODB_URI, port=MONGODB_PORT, username=None, password=None, no_id=True):
+def read_mongo(database, collection, query={}, host=MONGODB_URI, port=MONGODB_PORT,
+               username=DATA_ANALYST, password=ANALYST_PWD, no_id=True):
     """ Read from Mongo and Store into DataFrame """
 
     # Connect to MongoDB
@@ -43,7 +43,8 @@ def read_mongo(database, collection, query={}, host=MONGODB_URI, port=MONGODB_PO
     return df
 
 
-def to_mongo(database, collection, data: dict, host=MONGODB_URI, port=MONGODB_PORT, username=None, password=None):
+def to_mongo(database, collection, data: dict, host=MONGODB_URI, port=MONGODB_PORT,
+             username=DATA_COLLECTOR, password=COLLECTOR_PWD):
     """ Read from Mongo and Store into DataFrame """
 
     # Connect to MongoDB
