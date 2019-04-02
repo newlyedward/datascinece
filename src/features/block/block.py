@@ -12,13 +12,15 @@ import scipy.signal as signal
 
 # TODO 改用动态接口
 # get_history_hq_api(code, start=None, end=None, freq='d')
+from src.data.future.hq import build_future_index
 from src.data.tdx import get_future_hq
+from src.data.util import read_mongo, connect_mongo, ANALYST_PWD, DATA_ANALYST
 
 get_history_hq_api = get_future_hq
 
 FREQ = ('tick', '1m', '5m', '30m', 'h', 'd', 'w', 'm', 'q')
 
-log = LogHandler('block.log')
+log = LogHandler('features.log')
 
 
 class TsBlock:
@@ -310,7 +312,7 @@ def sort_one_candle_peaks(peak_df, invert=True):
     # 不存在同一个k线上有极值点的处理
     for row in df[df.index.duplicated()].itertuples():
         try:
-            if df.type[row.sn] != df.type[row.sn + 1] and invert:
+            if df.type.iloc[row.sn] != df.type.iloc[row.sn + 1] and invert:
                 df.iloc[row.sn], df.iloc[row.sn - 1] = df.iloc[row.sn - 1], df.iloc[row.sn]
         except IndexError:
             log.info('最后一根k线上有极值点')
@@ -339,8 +341,8 @@ def remove_fake_peaks(peak_df):
         diff_right = df.peak.diff(-1)
 
         # 和前一个极值点点比较，没有比较的情况假设是合理的极值点
-        diff_left[0] = -1 if df.type[0] == 'low' else 1
-        diff_right[-1] = -1 if df.type[-1] == 'low' else 1
+        diff_left.iloc[0] = -1 if df.type.iloc[0] == 'low' else 1
+        diff_right.iloc[-1] = -1 if df.type.iloc[-1] == 'low' else 1
 
         h_flag = np.logical_and(np.logical_and(diff_left >= 0, diff_right > 0),
                                 df.type == 'high')
@@ -468,9 +470,118 @@ def get_history_hq(code, start=None, end=None, freq='d'):
     else:  # only for test
         return None
 
+
 # --------------------------往数据库插入数据-------------------------------------
-def build_segments(instrument='future'):
-    if instrument == 'future':
+def build_segments():
+    # 更新指数数据
+    # build_future_index()
+
+    # 先从指数分析，期货只分析XX00指数合约和XX88连续合约
+    # Connect to MongoDB
+    conn = connect_mongo('quote')
+    segment_cursor = conn['segment']
+    index_cursor = conn['index']
+
+    filter_dict = {'symbol': {'$regex': '(8|0){2}$'}}
+    symbols = index_cursor.distinct('symbol', filter_dict)
+
+    if not isinstance(symbols, list) or len(symbols) == 0:
+        print("Don't find any trading symbols in index collection!")
+        return
+
+    for symbol in symbols:
+        # 从日线频率开始[ 5, 6, 7] 只处理日线 周线 月线数据,这里的频率只是级别分类，不代表字面意义
+        frequency = 5
+        # 是否形成新的段，形成新的段对block更新，有新的block，计算block之间的关系
+        #              同时判断高级别段是否形成
+        last_2_docs = segment_cursor.find({'symbol': symbol, 'frequency': frequency},
+                                              {'_id': 0}, sort=[('datetime', 1)], limit=2)
+
+        filter_dict = {'symbol': symbol}
+        if last_2_docs is None:
+            filter_dict['datetime'] = {'$lte': datetime(2000, 5, 20)}
+            log.info("Build {} future segment from trade beginning.".format(symbol))
+        else:
+            last_2_docs_df = pd.DataFrame(list(last_2_docs))
+            update = last_2_docs_df['datetime'].iloc[0]
+            filter_dict['datetime'] = {'$gte': update, '$lte': datetime(2000, 5, 30)}
+            log.info("Build {} future segment from {}".format(symbol, update))
+
+        # 从数据库读取所需数据
+        hq = index_cursor.find(filter_dict, {'_id': 0, 'datetime': 1, 'high': 1, 'low': 1})
+        hq_df = pd.DataFrame(list(hq))
+        if hq_df.empty:
+            log.warning('{} hq data:{} is empty!'.format(symbol, FREQ[frequency]))
+            continue
+
+        peak_df = get_peaks_from_hq(hq_df)
+        if peak_df.empty:
+            log.warning('{} peak:{} data is empty.'.format(symbol, FREQ[frequency]))
+            continue
+
+        segment_df = get_segments_from_peaks(peak_df)
+        if segment_df.empty:
+            log.warning('{} segment:{} data is empty.'.format(symbol, FREQ[frequency]))
+            continue
+
+        segment_df['symbol'] = symbol
+        segment_df['frequency'] = frequency
+        if last_2_docs is None:  # 以前没有记录直接插入
+            result = segment_cursor.insert_many(segment_df.to_dict('records'))
+            if result:
+                log.debug('{} segment:{} data insert success.'.format(symbol, FREQ[frequency]))
+            else:
+                log.warning('{} segment:{} data insert failure.'.format(symbol, FREQ[frequency]))
+                continue
+        else:
+            length = len(segment_df)
+            bflag = last_2_docs_df.equals(segment_df.iloc[:2])  # 最后一个记录是否需要更新
+
+            if bflag:
+                log.debug('{} segment:{} data do not need replace.'.format(symbol, FREQ[frequency]))
+            else:
+                result = segment_cursor.replace_one({datetime, last_2_docs_df['datetime'].iloc[1]},
+                                                    segment_df.iloc[1].to_dict('records'))
+                if result:
+                    log.debug('{} segment:{} data replace success.'.format(symbol, FREQ[frequency]))
+                else:
+                    log.warning('{} segment:{} data replace failure.'.format(symbol, FREQ[frequency]))
+                    continue
+
+            if length > 2:
+                result = segment_cursor.insert_many(segment_df.iloc[2:].to_dict('records'))
+                if result:
+                    log.debug('{} segment:{} data insert success.'.format(symbol, FREQ[frequency]))
+                else:
+                    log.warning('{} segment:{} data insert failure.'.format(symbol, FREQ[frequency]))
+                    continue
+
+            #     frequency += 1
+            #     filter_dict = {'symbol': symbol, 'frequency': frequency}
+            #
+            #     last_2_docs = segment_cursor.find_one({'symbol': symbol + '88', 'frequency': 5},
+            #                                        sort=[('datetime', -1)], skip=1)
+            #
+            #     if last_2_docs:
+            #         filter_dict['datetime'] = {'$gte': last_2_docs['datetime']}
+            #         print("Build {} future segment from {}".format(symbol, last_2_docs['datetime']))
+            #     else:
+            #         filter_dict['datetime'] = {'$lte': datetime(2000, 5, 20)}
+            #         print("Build {} future segment from trade beginning.".format(symbol))
+            #
+            #     # 从数据库读取所需数据
+            #     segment = segment_cursor.find(filter_dict, {'_id': 0, 'datetime': 1, 'high': 1, 'low': 1})
+            #     segment_df = pd.DataFrame(list(hq))
+            #     if segment_df.empty:
+            #         print('{} segment data have been updated before!'.format(symbol))
+            #         continue
+            #
+            #     peak_df = get_segments_from_peaks(segment_df)
+            #
+            # else:
+            #     continue
+
+        return segment_df
 
 
 if __name__ == "__main__":
@@ -480,17 +591,19 @@ if __name__ == "__main__":
 
     start = datetime(2018, 6, 29)
     end = datetime(2019, 3, 1)
+
+    build_segments()
     # observation = 250
     # start = today - timedelta(observation)
     # end = today - timedelta(7)
 
-    block = TsBlock("SRL8")
+    # block = TsBlock("SRL8")
     # peak = block.get_peaks(start=start, end=end)
     # segment = block.get_segments(start=start)
     # segment = block.get_segments(freq='w')
     # block_df = block.get_blocks()
 
-    block_w = block.get_current_status(freq='m')
+    # block_w = block.get_current_status(freq='m')
     # block_d = block.get_current_status(start=start)
     # segment_w = block.get_segments(start=start, freq='w')
     # segment_d = block.get_segments(start=start)

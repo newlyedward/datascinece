@@ -463,13 +463,14 @@ def build_future_index():
         print("Don't find any trading code in future collection!")
         return
 
-    # 按品种分别编制指数  已经停止交易品种 ['GN', 'WS', 'WT', 'RO', 'ER', 'ME', 'TC']
+    # 按品种分别编制指数
     for code in codes:
-        # 获取指数数据最近的一条主力合约记录的前一条记录，判断依据是前一天的持仓量
+        # 获取指数数据最近的一条主力合约记录，判断依据是前一天的持仓量
         last_doc = index_cursor.find_one({'symbol': code+'88'}, sort=[('datetime', -1)])
 
         if last_doc:
             filter_dict = {'code': code, 'datetime': {'$gte': last_doc['datetime']}}
+            # 已经改名交易品种['GN', 'WS', 'WT', 'RO', 'ER', 'ME', 'TC']
             #       老合约     新合约      老合约最后交易日
             # 甲醇   ME/50吨   MA/10吨       2015-5-15
             # 动力煤 TC/200吨  ZC/100吨      2016-4-8
@@ -505,11 +506,7 @@ def build_future_index():
         index_names = ['domain', 'near', 'next']
         contract_df = pd.DataFrame(index=date_index, columns=index_names)
 
-        if code == 'WS':
-            print('waiting')
-
         for date in date_index:
-            # TODO WS 有问题
             # hq.py:493: PerformanceWarning: indexing past lexsort depth may impact performance.
             #   s = hq_df.loc[date, 'openInt'].copy()
             s = hq_df.loc[date, 'openInt'].copy()
