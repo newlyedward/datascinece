@@ -16,7 +16,7 @@ from src.data.tdx import get_future_hq
 
 get_history_hq_api = get_future_hq
 
-FREQ = ('5m', '30m', 'h', 'd', 'w', 'm', 'q')
+FREQ = ('tick', '1m', '5m', '30m', 'h', 'd', 'w', 'm', 'q')
 
 log = LogHandler('block.log')
 
@@ -36,7 +36,7 @@ class TsBlock:
         :param start: datetime
         :param end: datetime
         :param freq: ('5m', '30m', 'd', 'w')
-        :return: [pd.DataFrame/Series, pd.DataFrame/Series]  升级形成的peak不带kindex
+        :return: [pd.DataFrame/Series, pd.DataFrame/Series]
         """
 
         temp_peak = self.__peaks[freq]
@@ -44,7 +44,7 @@ class TsBlock:
         if temp_peak.empty:
             if freq in ('5m', 'd'):
                 temp_df = get_history_hq(self.code, start=start, end=end, freq=freq)
-                hq_df = temp_df[['high', 'low', 'kindex']]
+                hq_df = temp_df[['high', 'low']]
                 temp_peak = get_peaks_from_hq(hq_df)
             else:
                 index = FREQ.index(freq) - 1
@@ -211,7 +211,7 @@ def identify_blocks_relation(df: pd.DataFrame):
 def identify_blocks(segment_df: pd.DataFrame):
     """
     identify blocks
-    :param segment_df: pd.DataFame, columns=[peak, kindex, type]
+    :param segment_df: pd.DataFame, columns=[peak, type]
     :return: pd.DataFrame(columns=['enter_dt', 'start_dt', 'end_dt', 'left_dt', 'block_high', 'block_low',
                                'block_highest', 'block_lowest', 'segment_num'])
             enter_dt:
@@ -297,7 +297,7 @@ def identify_blocks(segment_df: pd.DataFrame):
 def sort_one_candle_peaks(peak_df, invert=True):
     """
     对同一个k线的极值点进行排序
-    :param peak_df: pd.DataFrame columns=[peak, kindex, type]
+    :param peak_df: pd.DataFrame columns=[peak, type]
     :param invert: default True, 按 high， high和low， low排列
     :return: pd.DataFrame columns=[high, peak, type]
     """
@@ -322,8 +322,8 @@ def sort_one_candle_peaks(peak_df, invert=True):
 def remove_fake_peaks(peak_df):
     """
     删除比相邻极点高的低点和比相邻极点低的高点，包括了高点/低点连续出现的情况
-    :param peak_df: pd.DataFame, columns=[peak, kindex, type]
-    :return: pd.DataFame, columns=[peak, kindex, type]
+    :param peak_df: pd.DataFame, columns=[peak, type]
+    :return: pd.DataFame, columns=[peak, type]
     """
 
     # 检测输入类型
@@ -361,8 +361,8 @@ def remove_fake_peaks(peak_df):
 def get_segments_from_peaks(peak_df):
     """
     identify the segments from peaks
-    :param peak_df: pd.DataFame, columns=[peak, kindex, type]
-    :return: pd.DataFame, columns=[peak, kindex, type]
+    :param peak_df: pd.DataFame, columns=[peak, type]
+    :return: pd.DataFame, columns=[peak, type]
     """
     df = peak_df.copy()
 
@@ -380,10 +380,9 @@ def get_peaks_from_segments(segment_df):
     """
     only calculate the peaks of kline value of high and low
     :param segment_df: pd.DataFame,
-            columns=['peak', 'kindex', 'type']
-    :return: pd.DataFame, columns=[peak, kindex, type]
+            columns=['peak','type']
+    :return: pd.DataFame, columns=[peak, type]
         peak        high,low的极值点
-        kindex      k线的序列号
         type        'high' or 'low'
     """
 
@@ -429,10 +428,9 @@ def get_peaks_from_hq(hq_df):
     """
     only calculate the peaks of kline value of high and low
     :param hq_df: pd.DataFame,
-            columns=['high', 'low', 'kindex']
-    :return: pd.DataFame, columns=[peak, kindex, type]
+            columns=['high', 'low']
+    :return: pd.DataFame, columns=[peak, type]
         peak        high,low的极值点
-        kindex      k线的序列号
         type        'high' or 'low'
     """
     high_df = hq_df.rename(columns={'high': 'peak'})
@@ -466,10 +464,13 @@ def get_history_hq(code, start=None, end=None, freq='d'):
     """
     if get_history_hq_api:
         temp_hq_df = get_history_hq_api(code=code, start=start, end=end, freq=freq)
-        temp_hq_df['kindex'] = range(len(temp_hq_df))
-        return temp_hq_df[['high', 'low', 'kindex']]
+        return temp_hq_df[['high', 'low']]
     else:  # only for test
         return None
+
+# --------------------------往数据库插入数据-------------------------------------
+def build_segments(instrument='future'):
+    if instrument == 'future':
 
 
 if __name__ == "__main__":
