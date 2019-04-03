@@ -563,7 +563,7 @@ def build_future_index():
             frames += index_df.to_dict('records')
 
         result = index_cursor.insert_many(frames)
-        if result:
+        if result.acknowledged:
             print('{} index data insert success.'.format(code))
         else:
             print('{} index data insert failure.'.format(code))
