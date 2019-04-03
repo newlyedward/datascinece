@@ -472,6 +472,89 @@ def get_history_hq(code, start=None, end=None, freq='d'):
 
 
 # --------------------------往数据库插入数据-------------------------------------
+def build_one_instrument_segments(symbol, frequency, instrument='index'):
+    """
+    只对单交易品种的一个频率进行处理
+    :param symbol: 交易代码
+    :param frequency: 频率值，从0-8，从tick到quarter
+    :param instrument: 交易品种类型 future option stock bond convertible index
+    :return: True 还需要后续处理，不需要后续处理
+    """
+    conn = connect_mongo('quote')
+    segment_cursor = conn['segment']
+    index_cursor = conn[instrument]
+
+    # 是否形成新的段，形成新的段对block更新，有新的block，计算block之间的关系
+    #              同时判断高级别段是否形成
+    last_2_docs = segment_cursor.find({'symbol': symbol, 'frequency': frequency},
+                                      {'_id': 0}, sort=[('datetime', -1)], limit=2)
+
+    filter_dict = {'symbol': symbol}
+    if last_2_docs is None:
+        filter_dict['datetime'] = {'$lte': datetime(2000, 5, 20)}
+        log.info("Build {} future segment from trade beginning.".format(symbol))
+    else:
+        last_2_docs_df = pd.DataFrame(list(last_2_docs))
+        update = last_2_docs_df['datetime'].iloc[-1]
+        filter_dict['datetime'] = {'$gte': update, '$lte': datetime(2003, 5, 30)}
+        log.info("Build {} future segment from {}".format(symbol, update))
+
+    # 从数据库读取所需数据
+    hq = index_cursor.find(filter_dict, {'_id': 0, 'datetime': 1, 'high': 1, 'low': 1})
+    hq_df = pd.DataFrame(list(hq))
+    if hq_df.empty:
+        log.warning('{} hq data:{} is empty!'.format(symbol, FREQ[frequency]))
+        return False
+
+    peak_df = get_peaks_from_hq(hq_df)
+    if peak_df.empty:
+        log.warning('{} peak:{} data is empty.'.format(symbol, FREQ[frequency]))
+        return False
+
+    segment_df = get_segments_from_peaks(peak_df)
+    if segment_df.empty:
+        log.warning('{} segment:{} data is empty.'.format(symbol, FREQ[frequency]))
+        return False
+
+    segment_df['symbol'] = symbol
+    segment_df['frequency'] = frequency
+    if last_2_docs is None:  # 以前没有记录直接插入
+        result = segment_cursor.insert_many(segment_df.to_dict('records'))
+        if result:
+            log.debug('{} segment:{} data insert success.'.format(symbol, FREQ[frequency]))
+        else:
+            log.warning('{} segment:{} data insert failure.'.format(symbol, FREQ[frequency]))
+            return False
+    else:
+        length = len(segment_df)
+
+        # 比较记录是否需要更新，index和columns索引不相同都会认为不同
+        df1 = segment_df.iloc[:2].set_index('datetime')
+        df2 = last_2_docs_df.set_index('datetime')
+        df2 = df2.reindex_like(df1)
+        bflag = df2.equals(df1)
+
+        if bflag:
+            log.debug('{} segment:{} data do not need replace.'.format(symbol, FREQ[frequency]))
+        else:
+            result = segment_cursor.replace_one({datetime, last_2_docs_df['datetime'].iloc[1]},
+                                                segment_df.iloc[1].to_dict('records'))
+            if result:
+                log.debug('{} segment:{} data replace success.'.format(symbol, FREQ[frequency]))
+            else:
+                log.warning('{} segment:{} data replace failure.'.format(symbol, FREQ[frequency]))
+                return False
+
+        if length > 2:
+            result = segment_cursor.insert_many(segment_df.iloc[2:].to_dict('records'))
+            if result:
+                log.debug('{} segment:{} data insert success.'.format(symbol, FREQ[frequency]))
+            else:
+                log.warning('{} segment:{} data insert failure.'.format(symbol, FREQ[frequency]))
+                return False
+    return True
+
+
 def build_segments():
     # 更新指数数据
     # build_future_index()
@@ -495,7 +578,7 @@ def build_segments():
         # 是否形成新的段，形成新的段对block更新，有新的block，计算block之间的关系
         #              同时判断高级别段是否形成
         last_2_docs = segment_cursor.find({'symbol': symbol, 'frequency': frequency},
-                                              {'_id': 0}, sort=[('datetime', 1)], limit=2)
+                                          {'_id': 0}, sort=[('datetime', -1)], limit=2)
 
         filter_dict = {'symbol': symbol}
         if last_2_docs is None:
@@ -503,8 +586,8 @@ def build_segments():
             log.info("Build {} future segment from trade beginning.".format(symbol))
         else:
             last_2_docs_df = pd.DataFrame(list(last_2_docs))
-            update = last_2_docs_df['datetime'].iloc[0]
-            filter_dict['datetime'] = {'$gte': update, '$lte': datetime(2000, 5, 30)}
+            update = last_2_docs_df['datetime'].iloc[-1]
+            filter_dict['datetime'] = {'$gte': update, '$lte': datetime(2003, 5, 30)}
             log.info("Build {} future segment from {}".format(symbol, update))
 
         # 从数据库读取所需数据
@@ -535,7 +618,12 @@ def build_segments():
                 continue
         else:
             length = len(segment_df)
-            bflag = last_2_docs_df.equals(segment_df.iloc[:2])  # 最后一个记录是否需要更新
+
+            # 比较记录是否需要更新，index和columns索引不相同都会认为不同
+            df1 = segment_df.iloc[:2].set_index('datetime')
+            df2 = last_2_docs_df.set_index('datetime')
+            df2 = df2.reindex_like(df1)
+            bflag = df2.equals(df1)
 
             if bflag:
                 log.debug('{} segment:{} data do not need replace.'.format(symbol, FREQ[frequency]))
@@ -556,7 +644,8 @@ def build_segments():
                     log.warning('{} segment:{} data insert failure.'.format(symbol, FREQ[frequency]))
                     continue
 
-            #     frequency += 1
+                # 有新的段加入，要去build 高级别的段
+                frequency += 1
             #     filter_dict = {'symbol': symbol, 'frequency': frequency}
             #
             #     last_2_docs = segment_cursor.find_one({'symbol': symbol + '88', 'frequency': 5},
