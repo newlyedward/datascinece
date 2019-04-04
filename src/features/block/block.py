@@ -14,7 +14,7 @@ import scipy.signal as signal
 # get_history_hq_api(code, start=None, end=None, freq='d')
 from src.data.future.hq import build_future_index
 from src.data.tdx import get_future_hq
-from src.data.util import read_mongo, connect_mongo, ANALYST_PWD, DATA_ANALYST
+from src.data.util import connect_mongo
 
 get_history_hq_api = get_future_hq
 
@@ -486,20 +486,21 @@ def build_one_instrument_segments(symbol, frequency, instrument='index'):
     segment_cursor = conn['segment']
     index_cursor = conn[instrument]
 
-    project = {'_id': 0}
+    # project = {'_id': 0}
     # 是否形成新的段，形成新的段对block更新，有新的block，计算block之间的关系
     #              同时判断高级别段是否形成
-    last_2_docs = segment_cursor.find({'symbol': symbol, 'frequency': frequency},
-                                      project, sort=[('datetime', -1)], limit=2)
+    # segment 中datetime不唯一
+    last_2_docs = segment_cursor.find({'symbol': symbol, 'frequency': {'$gte': frequency}},
+                                      sort=[('datetime', -1)], limit=2)
 
     last_2_docs_df = pd.DataFrame(list(last_2_docs))
     filter_dict = {'symbol': symbol}
     if last_2_docs_df.empty:
-        filter_dict['datetime'] = {'$lte': datetime(2005, 2, 20)}
+        filter_dict['datetime'] = {'$lte': datetime(2005, 5, 20)}
         log.info("Build {} future segment from trade beginning.".format(symbol))
     else:
         update = last_2_docs_df['datetime'].iloc[-1]
-        filter_dict['datetime'] = {'$gte': update, '$lte': datetime(2005, 1, 30)}
+        filter_dict['datetime'] = {'$gte': update, '$lte': datetime(2005, 4, 28)}
         log.info("Build {} future segment from {}".format(symbol, update))
 
     # 从数据库读取所需数据
@@ -512,7 +513,8 @@ def build_one_instrument_segments(symbol, frequency, instrument='index'):
 
         peak_df = get_peaks_from_hq(hq_df)
     elif frequency > 5:
-        segment = segment_cursor.find(filter_dict, project)
+        filter_dict['frequency'] = {'$gte': frequency - 1}
+        segment = segment_cursor.find(filter_dict)
         segment_df = pd.DataFrame(list(segment))
         if segment_df.empty:
             log.warning('{} segment data:{} is empty!'.format(symbol, FREQ[frequency]))
@@ -545,8 +547,8 @@ def build_one_instrument_segments(symbol, frequency, instrument='index'):
             else:
                 log.warning('{} segment:{} data insert failure.'.format(symbol, FREQ[frequency]))
                 return False
-        elif frequency > 5:  # 以前没有日线以上级别记录，直接在日线记录上修改
-            result = segment_cursor.update_many({'datetime': {'$in': segment_df['datetime'].to_list()}},
+        elif frequency > 5:  # 以前没有日线以上级别记录，直接在日线记录上修改,不能用datetime作为索引
+            result = segment_cursor.update_many({'_id': {'$in': segment_df['_id'].to_list()}},
                                                 {'$set': {'frequency': frequency}})
             if result.acknowledged:
                 log.debug('{} segment:{} data update success.'.format(symbol, FREQ[frequency]))
@@ -563,6 +565,8 @@ def build_one_instrument_segments(symbol, frequency, instrument='index'):
         # 比较记录是否需要更新，index和columns索引不相同都会认为不同
         df1 = segment_df.iloc[:2].set_index('datetime')
         df2 = last_2_docs_df.set_index('datetime')
+        if '_id' not in df1.columns:   # 从hq数据得到的segment没有_id字段
+            del df2['_id']
         df2 = df2.reindex_like(df1)
         bflag = df2.equals(df1)
         segment_dict = segment_df.to_dict('records')
@@ -572,7 +576,7 @@ def build_one_instrument_segments(symbol, frequency, instrument='index'):
         else:
             if frequency == 5:
                 # Series.to_dict 数据类型是numpy.float64，需要转换
-                result = segment_cursor.replace_one({'datetime': last_2_docs_df['datetime'].iloc[0]},
+                result = segment_cursor.replace_one({'_id': last_2_docs_df['_id'].iloc[0]},
                                                     segment_dict[1])
                 if result.acknowledged:
                     log.debug('{} segment:{} data replace success.'.format(symbol, FREQ[frequency]))
@@ -614,7 +618,7 @@ def build_one_instrument_segments(symbol, frequency, instrument='index'):
             else:
                 log.warning('Wrong frequency:{} number for {}'.format(frequency, symbol))
                 return False
-    return False  # 多余项
+    # return False  # 多余项
 
 
 def build_segments():
@@ -624,7 +628,7 @@ def build_segments():
     # 先从指数分析，期货只分析XX00指数合约和XX88连续合约
     # Connect to MongoDB
     conn = connect_mongo('quote')
-    segment_cursor = conn['segment']
+    # segment_cursor = conn['segment']
     index_cursor = conn['index']
 
     filter_dict = {'symbol': {'$regex': '(8|0){2}$'}}
@@ -647,7 +651,7 @@ def build_segments():
 
 
 
-        return segment_df
+        # return segment_df
 
 
 if __name__ == "__main__":
