@@ -4,6 +4,8 @@ block
 ~~~~~~~~~~~~
 This module contains the identification of peaks, segments and blocks.
 """
+from bson.objectid import ObjectId
+
 from log import LogHandler
 # from datetime import datetime, timedelta
 import pandas as pd
@@ -496,11 +498,11 @@ def build_one_instrument_segments(symbol, frequency, instrument='index'):
     last_2_docs_df = pd.DataFrame(list(last_2_docs))
     filter_dict = {'symbol': symbol}
     if last_2_docs_df.empty:
-        filter_dict['datetime'] = {'$lte': datetime(2005, 5, 20)}
+        filter_dict['datetime'] = {'$lte': datetime(2006, 6, 20)}
         log.info("Build {} future segment from trade beginning.".format(symbol))
     else:
         update = last_2_docs_df['datetime'].iloc[-1]
-        filter_dict['datetime'] = {'$gte': update, '$lte': datetime(2005, 4, 28)}
+        filter_dict['datetime'] = {'$gte': update, '$lte': datetime(2006, 5, 30)}
         log.info("Build {} future segment from {}".format(symbol, update))
 
     # 从数据库读取所需数据
@@ -562,30 +564,41 @@ def build_one_instrument_segments(symbol, frequency, instrument='index'):
     else:
         length = len(segment_df)
 
-        # 比较记录是否需要更新，index和columns索引不相同都会认为不同
-        df1 = segment_df.iloc[:2].set_index('datetime')
-        df2 = last_2_docs_df.set_index('datetime')
-        if '_id' not in df1.columns:   # 从hq数据得到的segment没有_id字段
-            del df2['_id']
-        df2 = df2.reindex_like(df1)
-        bflag = df2.equals(df1)
+        # 比较记录是否需要更新，index和columns索引不相同都会认为不同，按type 类型排序
+        df1 = segment_df.iloc[:2, ].set_index('type')
+        bflag = True
+        # 同一根K线上高低点的情况前面已经处理过，如果还出现这种情况，不对数据库的数据进行更换
+        idx = 2
+        if df1['datetime'].iloc[0] != df1['datetime'].iloc[1]:
+            df2 = last_2_docs_df.set_index('type')
+            if '_id' not in df1.columns:   # 从hq数据得到的segment没有_id字段
+                del df2['_id']
+            del df1['frequency']
+            del df2['frequency']
+            df2 = df2.reindex_like(df1)
+            bflag = df2.equals(df1)
+        else:
+            idx = 3
+
         segment_dict = segment_df.to_dict('records')
 
         if bflag:
             log.debug('{} segment:{} data do not need replace.'.format(symbol, FREQ[frequency]))
         else:
+            record_id = last_2_docs_df.loc[last_2_docs_df['type'] == segment_df['type'].iloc[1], '_id']
+            record_id = ObjectId(record_id.values[0])
             if frequency == 5:
                 # Series.to_dict 数据类型是numpy.float64，需要转换
-                result = segment_cursor.replace_one({'_id': last_2_docs_df['_id'].iloc[0]},
-                                                    segment_dict[1])
+
+                result = segment_cursor.replace_one({'_id': record_id}, segment_dict[1])
                 if result.acknowledged:
                     log.debug('{} segment:{} data replace success.'.format(symbol, FREQ[frequency]))
                 else:
                     log.warning('{} segment:{} data replace failure.'.format(symbol, FREQ[frequency]))
                     return False
             elif frequency > 5:
-                result = segment_cursor.update_one({'datetime': last_2_docs_df['datetime'].iloc[0]},
-                                                   {'frequency': frequency - 1})
+                result = segment_cursor.update_one({'_id': record_id},
+                                                   {'$set': {'frequency': frequency - 1}})
                 if result.acknowledged:
                     log.debug('{} segment:{} data update success.'.format(symbol, FREQ[frequency]))
                 else:
@@ -594,12 +607,11 @@ def build_one_instrument_segments(symbol, frequency, instrument='index'):
             else:
                 log.warning('Wrong frequency:{} number for {}'.format(frequency, symbol))
                 return False
-
-        if length <= 2:
+        if length <= idx:
             return False   # 没有增加新的段不需要后续处理
         else:
             if frequency == 5:
-                result = segment_cursor.insert_many(segment_dict[2:])
+                result = segment_cursor.insert_many(segment_dict[idx:])
                 if result.acknowledged:
                     log.debug('{} segment:{} data insert success.'.format(symbol, FREQ[frequency]))
                     return True   # 形成新的segment，需要后续进行处理block
@@ -607,8 +619,9 @@ def build_one_instrument_segments(symbol, frequency, instrument='index'):
                     log.warning('{} segment:{} data insert failure.'.format(symbol, FREQ[frequency]))
                     return False
             elif frequency > 5:
-                result = segment_cursor.update_many({'datetime': {'$in': segment_df['datetime'].iloc[2:]}},
-                                                    {'frequency': frequency})
+                record_id = segment_df['_id'].iloc[idx:].to_list()
+                result = segment_cursor.update_many({'datetime': {'$in': record_id}},
+                                                    {'$set': {'frequency': frequency}})
                 if result.acknowledged:
                     log.debug('{} segment:{} data update success.'.format(symbol, FREQ[frequency]))
                     return True  # 形成新的segment，需要后续进行处理block

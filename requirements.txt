@@ -1,3 +1,4 @@
+bson
 python-dotenv
 pymongo
 scipy
