@@ -17,6 +17,7 @@ import scipy.signal as signal
 from src.data.future.hq import build_future_index
 from src.data.tdx import get_future_hq
 from src.data.util import connect_mongo
+from src.setting import DATA_ANALYST, ANALYST_PWD
 
 get_history_hq_api = get_future_hq
 
@@ -498,11 +499,11 @@ def build_one_instrument_segments(symbol, frequency, instrument='index'):
     last_2_docs_df = pd.DataFrame(list(last_2_docs))
     filter_dict = {'symbol': symbol}
     if last_2_docs_df.empty:
-        filter_dict['datetime'] = {'$lte': datetime(2006, 6, 20)}
+        filter_dict['datetime'] = {'$lte': datetime(2006, 8, 20)}
         log.info("Build {} future segment from trade beginning.".format(symbol))
     else:
         update = last_2_docs_df['datetime'].iloc[-1]
-        filter_dict['datetime'] = {'$gte': update, '$lte': datetime(2006, 5, 30)}
+        filter_dict['datetime'] = {'$gte': update, '$lte': datetime(2006, 8, 7)}
         log.info("Build {} future segment from {}".format(symbol, update))
 
     # 从数据库读取所需数据
@@ -620,10 +621,11 @@ def build_one_instrument_segments(symbol, frequency, instrument='index'):
                     return False
             elif frequency > 5:
                 record_id = segment_df['_id'].iloc[idx:].to_list()
-                result = segment_cursor.update_many({'datetime': {'$in': record_id}},
+                result = segment_cursor.update_many({'_id': {'$in': record_id}},
                                                     {'$set': {'frequency': frequency}})
                 if result.acknowledged:
-                    log.debug('{} segment:{} data update success.'.format(symbol, FREQ[frequency]))
+                    x = result.modified_count
+                    log.debug('{} segment:{} data update {} success.'.format(symbol, FREQ[frequency], x))
                     return True  # 形成新的segment，需要后续进行处理block
                 else:
                     log.warning('{} segment:{} data update failure.'.format(symbol, FREQ[frequency]))
@@ -657,14 +659,55 @@ def build_segments():
         # 是否形成新的段，形成新的段对block更新，有新的block，计算block之间的关系
         #              同时判断高级别段是否形成
         bflag = True
-        while bflag and frequency < 8:
+        while bflag and frequency < 9:
             bflag = build_one_instrument_segments(symbol, frequency, instrument='index')
             frequency += 1
 
 
+def get_segment(symbol=None, start_date=None, end_date=None, frequency='d'):
+    """
+        获取行情数据
+    :param symbol: 合约代码，symbol, symbol list, 只支持同种类.
+    :param start_date:
+    :param end_date:    结束日期，交易使用时，默认为策略当前日期前一天
+    :param frequency:   历史数据的频率, 默认为'd', 只支持日线级别以上数据。'5m'代表5分钟线。    :return:
+        传入一个symbol，多个fields，函数会返回一个pandas DataFrame
+        传入一个symbol，一个field，函数会返回pandas Series
+        传入多个symbol，一个field，函数会返回一个pandas DataFrame
+        传入多个symbol，函数会返回一个multiIndexe DataFrame
+    """
+    # 连接数据库
+    conn = connect_mongo(db='quote', username=DATA_ANALYST, password=ANALYST_PWD)
 
+    cursor = conn['segment']
 
-        # return segment_df
+    frequency = FREQ.index(frequency)
+
+    filter_dict = {'frequency': {'$gte': frequency}}
+
+    if isinstance(symbol, list):
+        filter_dict['symbol'] = {'$in': symbol}
+    elif isinstance(symbol, str):
+        filter_dict['symbol'] = symbol
+    else:
+        log.debug('Return all commodities segments!')
+
+    if start_date is not None:
+        filter_dict['datetime'] = {'$gte': start_date}
+
+    if end_date is not None:
+        if 'datetime' in filter_dict:
+            filter_dict['datetime']['$lte'] = end_date
+        else:
+            filter_dict['datetime'] = {'$lte': end_date}
+
+    project_dict = {'_id': 0}
+
+    segments = cursor.find(filter_dict, project_dict)
+
+    # Expand the cursor and construct the DataFrame
+    segment_df = pd.DataFrame(list(segments))
+    return segment_df
 
 
 if __name__ == "__main__":

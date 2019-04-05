@@ -10,7 +10,7 @@ from log import LogHandler
 log = LogHandler('data.log')
 
 
-def get_price(symbol=None, instrument='index', start_date=None, end_date=None, frequency='1d', fields=None):
+def get_price(symbol=None, instrument='index', start_date=None, end_date=None, frequency='d', fields=None):
     """
         获取行情数据
     :param symbol: 合约代码，symbol, symbol list, 只支持同种类。获取tick数据时，只支持单个symbol
@@ -153,7 +153,7 @@ def get_warehouse_stocks(code, start_date=None, end_date=None):
 
 if __name__ == '__main__':
     start = datetime(2019, 1, 1)
-    end = datetime(2019, 3, 1)
+    end = datetime(2006, 8, 3)
     # contracts = get_contracts('CU')
     # contracts = get_contracts('CU', end)
     # df = get_dominant('CU')
@@ -161,4 +161,4 @@ if __name__ == '__main__':
     # df = get_dominant('CU', start_date=start, end_date=end)
     # df = get_dominant('CU', end_date=start)
     # df = get_price(['CU88', 'M88'], start_date=start, end_date=end, fields=['open', 'close'])
-    # df = get_price()
+    df = get_price('A88', end_date=end)
