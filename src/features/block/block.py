@@ -566,46 +566,30 @@ def build_one_instrument_segments(symbol, frequency, instrument='index'):
             log.warning('{} segment:{} data update failure.'.format(symbol, FREQ[frequency]))
             return False
 
-    idx = last_docs_len = len(last_2_docs_df)
-    # columns = ['datetime', 'type', 'peak']
+    last_docs_len = len(last_2_docs_df)
     index = ['datetime', 'type']
-    df1 = segment_df.iloc[:last_docs_len].set_index(index).sort_index()
+    df1 = segment_df.set_index(index).sort_index()
     df2 = last_2_docs_df.set_index(index).sort_index()
 
-    # 对最后一个数据要进行替换或者更新
-    bflag = True
-
+    update_index = df2.index.difference(df1.index)    # 日期类型都要看
+    insert_dt_index = df1.index.get_level_values(0).difference(df2.index.get_level_values(0))    # 只看日期
     # 会出现只有一个记录的情况，特别是高级别segment
-    if df2.index.equals(df1.index):
-        bflag = False
-    elif last_docs_len == 1:
+    if last_docs_len == 1:
         # 数据全部插入，只有一个数据后面可能拒绝，需要处理 Todo
-        idx = 0
-    elif last_docs_len == 2:
-        if len(df1.index.unique(0)) == 1:
-            idx = 3
-            bflag = False
-        elif len(df2.index.difference(df1.index)) == 1:
-            log.info('{} segment:{} last record need updated.'.format(symbol, FREQ[frequency]))
-        else:
-            log.error('{} segment:{} history data is wrong.'.format(symbol, FREQ[frequency]))
-            return False
-
-    segment_dict = segment_df.to_dict('records')
+        update_index = df2.index
+        log.info('{} segment:{} has only one record and need updated.'.format(symbol, FREQ[frequency]))
 
     # 需要更新数据库原有数据
-    if bflag:
-        record_id = df2.loc[df2.index.difference(df1.index), '_id']
+    if len(update_index) != 0:
+        assert len(update_index) == 1
+        record_id = df2.loc[update_index, '_id']
         record_id = ObjectId(record_id.values[0])
 
         if frequency == 5:
-            # Series.to_dict 数据类型是numpy.float64，需要转换, dataFrame.to_dict 是 float，不需要数据再转换，因此提前转换
-            result = segment_cursor.replace_one({'_id': record_id}, segment_dict[last_docs_len - 1])
+            result = segment_cursor.delete_one({'_id': record_id})
         elif frequency > 5:
             result = segment_cursor.update_one({'_id': record_id},
                                                {'$set': {'frequency': frequency - 1}})
-            result &= segment_cursor.update_one({'_id': segment_dict[last_docs_len - 1]['_id']},
-                                                {'$set': {'frequency': frequency}})
         else:
             log.warning('Wrong frequency:{} number for {}'.format(frequency, symbol))
             return False
@@ -616,13 +600,15 @@ def build_one_instrument_segments(symbol, frequency, instrument='index'):
             log.warning('{} segment:{} data replace failure.'.format(symbol, FREQ[frequency]))
             return False
 
-    if len(segment_df) <= idx:
-        return False   # 没有增加新的段不需要后续处理
+    if len(insert_dt_index) == 0:
+        return False
 
+    insert_df = df1.loc[insert_dt_index]
     if frequency == 5:
-        result = segment_cursor.insert_many(segment_dict[idx:])
+        segment_dict = insert_df.reset_index().to_dict('records')
+        result = segment_cursor.insert_many(segment_dict)
     elif frequency > 5:
-        record_id = segment_df['_id'].iloc[idx:].to_list()
+        record_id = insert_df['_id'].to_list()
         result = segment_cursor.update_many({'_id': {'$in': record_id}},
                                             {'$set': {'frequency': frequency}})
     else:
