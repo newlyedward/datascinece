@@ -21,7 +21,7 @@ from src.setting import DATA_ANALYST, ANALYST_PWD
 
 get_history_hq_api = get_future_hq
 
-FREQ = ('tick', '1m', '5m', '30m', 'h', 'd', 'w', 'm', 'q')
+FREQ = ('tick', '1m', '5m', '30m', 'h', 'd', 'w', 'm', 'q', 'y')
 
 log = LogHandler('features.log')
 
@@ -318,7 +318,7 @@ def sort_one_candle_peaks(peak_df, invert=True):
             if df.type.iloc[row.sn] != df.type.iloc[row.sn + 1] and invert:
                 df.iloc[row.sn], df.iloc[row.sn - 1] = df.iloc[row.sn - 1], df.iloc[row.sn]
         except IndexError:
-            log.info('最后一根k线上有极值点')
+            log.info('Last kline has both high and low as peaks!')
 
     del df['sn']
     return df
@@ -498,18 +498,25 @@ def build_one_instrument_segments(symbol, frequency, instrument='index'):
 
     last_2_docs_df = pd.DataFrame(list(last_2_docs))
     filter_dict = {'symbol': symbol}
-    if last_2_docs_df.empty:
-        filter_dict['datetime'] = {'$lte': datetime(2006, 8, 20)}
+    #  只有一个记录或者没有记录要从头开始取数据
+    if last_2_docs_df.empty or len(last_2_docs_df) == 1:
+        # filter_dict['datetime'] = {'$lte': datetime(2012, 9, 20)}
         log.info("Build {} future segment from trade beginning.".format(symbol))
     else:
         update = last_2_docs_df['datetime'].iloc[-1]
-        filter_dict['datetime'] = {'$gte': update, '$lte': datetime(2006, 8, 7)}
+        # filter_dict['datetime'] = {'$gte': update, '$lte': datetime(2012, 9, 7)}
+        filter_dict['datetime'] = {'$gte': update}
         log.info("Build {} future segment from {}".format(symbol, update))
 
     # 从数据库读取所需数据
     if frequency == 5:  # 日线数据从行情数据库取数据
         hq = index_cursor.find(filter_dict, {'_id': 0, 'datetime': 1, 'high': 1, 'low': 1})
         hq_df = pd.DataFrame(list(hq))
+        if hq_df.empty:
+            log.warning('{} hq data:{} is empty!'.format(symbol, FREQ[frequency]))
+            return False
+        # 剔除掉成交价格为0的数据
+        hq_df = hq_df[hq_df['low'] > 1e-10]
         if hq_df.empty:
             log.warning('{} hq data:{} is empty!'.format(symbol, FREQ[frequency]))
             return False
@@ -541,99 +548,93 @@ def build_one_instrument_segments(symbol, frequency, instrument='index'):
         segment_df['symbol'] = symbol
         segment_df['frequency'] = frequency
 
+    # 没有记录直接插入数据
     if last_2_docs_df.empty:
         if frequency == 5:  # 以前没有日线记录直接插入
             result = segment_cursor.insert_many(segment_df.to_dict('records'))
-            if result.acknowledged:
-                log.debug('{} segment:{} data insert success.'.format(symbol, FREQ[frequency]))
-                return True
-            else:
-                log.warning('{} segment:{} data insert failure.'.format(symbol, FREQ[frequency]))
-                return False
         elif frequency > 5:  # 以前没有日线以上级别记录，直接在日线记录上修改,不能用datetime作为索引
             result = segment_cursor.update_many({'_id': {'$in': segment_df['_id'].to_list()}},
                                                 {'$set': {'frequency': frequency}})
-            if result.acknowledged:
-                log.debug('{} segment:{} data update success.'.format(symbol, FREQ[frequency]))
-                return True  # 形成新的segment，需要后续进行处理block
-            else:
-                log.warning('{} segment:{} data update failure.'.format(symbol, FREQ[frequency]))
-                return False
         else:
             log.warning('Wrong frequency:{} number for {}'.format(frequency, symbol))
             return False
-    else:
-        length = len(segment_df)
 
-        # 比较记录是否需要更新，index和columns索引不相同都会认为不同，按type 类型排序
-        df1 = segment_df.iloc[:2, ].set_index('type')
-        bflag = True
-        # 同一根K线上高低点的情况前面已经处理过，如果还出现这种情况，不对数据库的数据进行更换
-        idx = 2
-        if df1['datetime'].iloc[0] != df1['datetime'].iloc[1]:
-            df2 = last_2_docs_df.set_index('type')
-            if '_id' not in df1.columns:   # 从hq数据得到的segment没有_id字段
-                del df2['_id']
-            del df1['frequency']
-            del df2['frequency']
-            df2 = df2.reindex_like(df1)
-            bflag = df2.equals(df1)
+        if result.acknowledged:
+            log.debug('{} segment:{} data update success.'.format(symbol, FREQ[frequency]))
+            return True  # 形成新的segment，需要后续进行处理block
         else:
+            log.warning('{} segment:{} data update failure.'.format(symbol, FREQ[frequency]))
+            return False
+
+    idx = last_docs_len = len(last_2_docs_df)
+    # columns = ['datetime', 'type', 'peak']
+    index = ['datetime', 'type']
+    df1 = segment_df.iloc[:last_docs_len].set_index(index).sort_index()
+    df2 = last_2_docs_df.set_index(index).sort_index()
+
+    # 对最后一个数据要进行替换或者更新
+    bflag = True
+
+    # 会出现只有一个记录的情况，特别是高级别segment
+    if df2.index.equals(df1.index):
+        bflag = False
+    elif last_docs_len == 1:
+        # 数据全部插入，只有一个数据后面可能拒绝，需要处理 Todo
+        idx = 0
+    elif last_docs_len == 2:
+        if len(df1.index.unique(0)) == 1:
             idx = 3
-
-        segment_dict = segment_df.to_dict('records')
-
-        if bflag:
-            log.debug('{} segment:{} data do not need replace.'.format(symbol, FREQ[frequency]))
+            bflag = False
+        elif len(df2.index.difference(df1.index)) == 1:
+            log.info('{} segment:{} last record need updated.'.format(symbol, FREQ[frequency]))
         else:
-            record_id = last_2_docs_df.loc[last_2_docs_df['type'] == segment_df['type'].iloc[1], '_id']
-            record_id = ObjectId(record_id.values[0])
-            if frequency == 5:
-                # Series.to_dict 数据类型是numpy.float64，需要转换
+            log.error('{} segment:{} history data is wrong.'.format(symbol, FREQ[frequency]))
+            return False
 
-                result = segment_cursor.replace_one({'_id': record_id}, segment_dict[1])
-                if result.acknowledged:
-                    log.debug('{} segment:{} data replace success.'.format(symbol, FREQ[frequency]))
-                else:
-                    log.warning('{} segment:{} data replace failure.'.format(symbol, FREQ[frequency]))
-                    return False
-            elif frequency > 5:
-                result = segment_cursor.update_one({'_id': record_id},
-                                                   {'$set': {'frequency': frequency - 1}})
-                if result.acknowledged:
-                    log.debug('{} segment:{} data update success.'.format(symbol, FREQ[frequency]))
-                else:
-                    log.warning('{} segment:{} data update failure.'.format(symbol, FREQ[frequency]))
-                    return False
-            else:
-                log.warning('Wrong frequency:{} number for {}'.format(frequency, symbol))
-                return False
-        if length <= idx:
-            return False   # 没有增加新的段不需要后续处理
+    segment_dict = segment_df.to_dict('records')
+
+    # 需要更新数据库原有数据
+    if bflag:
+        record_id = df2.loc[df2.index.difference(df1.index), '_id']
+        record_id = ObjectId(record_id.values[0])
+
+        if frequency == 5:
+            # Series.to_dict 数据类型是numpy.float64，需要转换, dataFrame.to_dict 是 float，不需要数据再转换，因此提前转换
+            result = segment_cursor.replace_one({'_id': record_id}, segment_dict[last_docs_len - 1])
+        elif frequency > 5:
+            result = segment_cursor.update_one({'_id': record_id},
+                                               {'$set': {'frequency': frequency - 1}})
+            result &= segment_cursor.update_one({'_id': segment_dict[last_docs_len - 1]['_id']},
+                                                {'$set': {'frequency': frequency}})
         else:
-            if frequency == 5:
-                result = segment_cursor.insert_many(segment_dict[idx:])
-                if result.acknowledged:
-                    log.debug('{} segment:{} data insert success.'.format(symbol, FREQ[frequency]))
-                    return True   # 形成新的segment，需要后续进行处理block
-                else:
-                    log.warning('{} segment:{} data insert failure.'.format(symbol, FREQ[frequency]))
-                    return False
-            elif frequency > 5:
-                record_id = segment_df['_id'].iloc[idx:].to_list()
-                result = segment_cursor.update_many({'_id': {'$in': record_id}},
-                                                    {'$set': {'frequency': frequency}})
-                if result.acknowledged:
-                    x = result.modified_count
-                    log.debug('{} segment:{} data update {} success.'.format(symbol, FREQ[frequency], x))
-                    return True  # 形成新的segment，需要后续进行处理block
-                else:
-                    log.warning('{} segment:{} data update failure.'.format(symbol, FREQ[frequency]))
-                    return False
-            else:
-                log.warning('Wrong frequency:{} number for {}'.format(frequency, symbol))
-                return False
-    # return False  # 多余项
+            log.warning('Wrong frequency:{} number for {}'.format(frequency, symbol))
+            return False
+
+        if result.acknowledged:
+            log.debug('{} segment:{} data replace success.'.format(symbol, FREQ[frequency]))
+        else:
+            log.warning('{} segment:{} data replace failure.'.format(symbol, FREQ[frequency]))
+            return False
+
+    if len(segment_df) <= idx:
+        return False   # 没有增加新的段不需要后续处理
+
+    if frequency == 5:
+        result = segment_cursor.insert_many(segment_dict[idx:])
+    elif frequency > 5:
+        record_id = segment_df['_id'].iloc[idx:].to_list()
+        result = segment_cursor.update_many({'_id': {'$in': record_id}},
+                                            {'$set': {'frequency': frequency}})
+    else:
+        log.warning('Wrong frequency:{} number for {}'.format(frequency, symbol))
+        return False
+
+    if result.acknowledged:
+        log.debug('{} segment:{} data update success.'.format(symbol, FREQ[frequency]))
+        return True  # 形成新的segment，需要后续进行处理block
+    else:
+        log.warning('{} segment:{} data update failure.'.format(symbol, FREQ[frequency]))
+        return False
 
 
 def build_segments():
@@ -659,7 +660,7 @@ def build_segments():
         # 是否形成新的段，形成新的段对block更新，有新的block，计算block之间的关系
         #              同时判断高级别段是否形成
         bflag = True
-        while bflag and frequency < 9:
+        while bflag and frequency < 10:
             bflag = build_one_instrument_segments(symbol, frequency, instrument='index')
             frequency += 1
 
