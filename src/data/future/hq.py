@@ -427,6 +427,10 @@ def build_weighted_index(hq_df, weight='volume'):
     :return: hq_df 剔除了symbol字段或者索引
     """
     df = hq_df.copy()
+    df = df.dropna()
+    if len(hq_df) > len(df):
+        log.info('Some OHLC data are NaN')
+
     columns = ['open', 'high', 'low', 'close']
 
     for column in columns:
@@ -449,7 +453,7 @@ def build_future_index():
     :return:
     """
     # 更新数据库行情数据
-    insert_hq_to_mongo()
+    # insert_hq_to_mongo()
 
     # 连接数据库
     conn = connect_mongo(db='quote')
