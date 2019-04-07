@@ -13,7 +13,7 @@ from src.data.util import get_post_text, get_html_text, connect_mongo
 from log import LogHandler
 
 # TIME_WAITING = 1
-log = LogHandler('future.hq.log')
+log = LogHandler('data.log')
 
 
 def is_data_empty(data):
@@ -428,8 +428,6 @@ def build_weighted_index(hq_df, weight='volume'):
     """
     df = hq_df.copy()
     df = df.dropna()
-    if len(hq_df) > len(df):
-        log.info('Some OHLC data are NaN')
 
     columns = ['open', 'high', 'low', 'close']
 

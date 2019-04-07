@@ -98,7 +98,7 @@ class TsBlock:
         :param start: datetime
         :param end: datetime
         :param freq: ('5m', '30m', 'd', 'w')
-        :return: pd.Dataframe   columns=['end_dt', 'block_high', 'block_low', 'block_highest', 'block_lowest',
+        :return: pd.Dataframe   columns=['end_date', 'block_high', 'block_low', 'block_highest', 'block_lowest',
                                          'segment_num', 'block_flag', 'block_type', 'top_bottom_flag']
         """
 
@@ -133,9 +133,9 @@ class TsBlock:
 def identify_blocks_relation(df: pd.DataFrame):
     """
 
-    :param df: pd.DataFrame(columns=['enter_dt', 'start_dt', 'end_dt', 'left_dt', 'block_high', 'block_low',
+    :param df: pd.DataFrame(columns=['enter_date', 'start_date', 'end_date', 'left_date', 'block_high', 'block_low',
                                'block_highest', 'block_lowest', 'segment_num'])
-    :return: pd.DataFrame(columns=['enter_dt', 'start_dt', 'end_dt', 'left_dt', 'block_high', 'block_low',
+    :return: pd.DataFrame(columns=['enter_date', 'start_date', 'end_date', 'left_date', 'block_high', 'block_low',
                                'block_highest', 'block_lowest', 'segment_num', 'block_type', 'block_type', 'sn'])
         block_type: up, down
         block_relation: up, down, overlap, include, included
@@ -217,12 +217,12 @@ def identify_blocks(segment_df: pd.DataFrame):
     """
     identify blocks
     :param segment_df: pd.DataFame, columns=[peak, type]
-    :return: pd.DataFrame(columns=['enter_dt', 'start_dt', 'end_dt', 'left_dt', 'block_high', 'block_low',
+    :return: pd.DataFrame(columns=['enter_date', 'start_date', 'end_date', 'left_date', 'block_high', 'block_low',
                                'block_highest', 'block_lowest', 'segment_num'])
-            enter_dt:
-            start_dt:
-            end_dt:
-            left_dt:
+            enter_date:
+            start_date:
+            end_date:
+            left_date:
             block_high:
             block_low:
             block_highest:
@@ -233,13 +233,13 @@ def identify_blocks(segment_df: pd.DataFrame):
     block_high = block_highest = current_high = current_highest = segment_df.peak[1:3].max()
     block_low = block_lowest = current_low = current_lowest = segment_df.peak[1:3].min()
 
-    enter_dt = segment_df.index[0]
-    start_dt = segment_df.index[1]
-    end_dt = left_dt = segment_df.index[2]
+    enter_date = segment_df.index[0]
+    start_date = segment_df.index[1]
+    end_date = left_date = segment_df.index[2]
     segment_num = 2
 
     # 初始化block表
-    columns = ['enter_dt', 'start_dt', 'end_dt', 'left_dt', 'block_high', 'block_low',
+    columns = ['enter_date', 'start_date', 'end_date', 'left_date', 'block_high', 'block_low',
                'block_highest', 'block_lowest', 'segment_num']
     df = pd.DataFrame(columns=columns)
 
@@ -247,37 +247,37 @@ def identify_blocks(segment_df: pd.DataFrame):
         current_dt = row.Index
         if row.type == 'high':  # 顶
             if row.peak < block_low:  # 第三类卖点，新的中枢开始
-                insert_row = pd.DataFrame([[enter_dt, start_dt, end_dt, left_dt, block_high, block_low,
+                insert_row = pd.DataFrame([[enter_date, start_date, end_date, left_date, block_high, block_low,
                                             block_highest, block_lowest, segment_num]], columns=columns)
                 df = df.append(insert_row, ignore_index=True)
 
-                enter_dt = end_dt
-                start_dt = left_dt
-                end_dt = left_dt = current_dt
+                enter_date = end_date
+                start_date = left_date
+                end_date = left_date = current_dt
                 segment_num = 2
                 block_high = block_highest = current_high = current_highest = row.peak
-                block_low = block_lowest = current_low = current_lowest = segment_df.loc[start_dt, 'peak'].min() \
-                    if isinstance(segment_df.loc[start_dt, 'peak'], pd.Series) else segment_df.loc[start_dt, 'peak']
+                block_low = block_lowest = current_low = current_lowest = segment_df.loc[start_date, 'peak'].min() \
+                    if isinstance(segment_df.loc[start_date, 'peak'], pd.Series) else segment_df.loc[start_date, 'peak']
             else:
                 segment_num = segment_num + 1
                 block_low = current_low
                 current_high = min(block_high, row.peak)
                 block_lowest = current_lowest
                 current_highest = max(block_highest, row.peak)
-                end_dt = left_dt
-                left_dt = current_dt
+                end_date = left_date
+                left_date = current_dt
         else:
             if row.peak > block_high:  # 第三类买点，新的中枢开始
-                insert_row = pd.DataFrame([[enter_dt, start_dt, end_dt, left_dt, block_high, block_low,
+                insert_row = pd.DataFrame([[enter_date, start_date, end_date, left_date, block_high, block_low,
                                             block_highest, block_lowest, segment_num]], columns=columns)
                 df = df.append(insert_row, ignore_index=True)
 
-                enter_dt = end_dt
-                start_dt = left_dt
-                end_dt = left_dt = current_dt
+                enter_date = end_date
+                start_date = left_date
+                end_date = left_date = current_dt
                 segment_num = 2
-                block_high = block_highest = current_high = current_highest = segment_df.loc[start_dt, 'peak'].max() \
-                    if isinstance(segment_df.loc[start_dt, 'peak'], pd.Series) else segment_df.loc[start_dt, 'peak']
+                block_high = block_highest = current_high = current_highest = segment_df.loc[start_date, 'peak'].max() \
+                    if isinstance(segment_df.loc[start_date, 'peak'], pd.Series) else segment_df.loc[start_date, 'peak']
                 block_low = block_lowest = current_low = current_lowest = row.peak
             else:
                 segment_num = segment_num + 1
@@ -286,14 +286,14 @@ def identify_blocks(segment_df: pd.DataFrame):
                 block_highest = current_highest
                 current_lowest = min(block_lowest, row.peak)
 
-                end_dt = left_dt
-                left_dt = current_dt
+                end_date = left_date
+                left_date = current_dt
 
     # record last block
-    insert_row = pd.DataFrame([[enter_dt, start_dt, end_dt, left_dt, block_high, block_low, block_highest,
+    insert_row = pd.DataFrame([[enter_date, start_date, end_date, left_date, block_high, block_low, block_highest,
                                 block_lowest, segment_num]], columns=columns)
     df = df.append(insert_row, ignore_index=True)
-    return df.set_index('enter_dt')
+    return df.set_index('enter_date')
 
 
 # TODO 增加对 删除连续高低点；删除低点比高点高的段；删除高低点较近的段 的测试用例
@@ -481,13 +481,13 @@ def build_one_instrument_segments(symbol, frequency, instrument='index'):
     """
     只对单交易品种的一个频率进行处理
     :param symbol: 交易代码
-    :param frequency: 频率值，从0-8，从tick到quarter
+    :param frequency: 频率值，从0-9，从tick到year
     :param instrument: 交易品种类型 future option stock bond convertible index
     :return: True 还需要后续处理，不需要后续处理
     """
     conn = connect_mongo('quote')
     segment_cursor = conn['segment']
-    index_cursor = conn[instrument]
+    inst_cursor = conn[instrument]
 
     # project = {'_id': 0}
     # 是否形成新的段，形成新的段对block更新，有新的block，计算block之间的关系
@@ -510,7 +510,7 @@ def build_one_instrument_segments(symbol, frequency, instrument='index'):
 
     # 从数据库读取所需数据
     if frequency == 5:  # 日线数据从行情数据库取数据
-        hq = index_cursor.find(filter_dict, {'_id': 0, 'datetime': 1, 'high': 1, 'low': 1})
+        hq = inst_cursor.find(filter_dict, {'_id': 0, 'datetime': 1, 'high': 1, 'low': 1})
         hq_df = pd.DataFrame(list(hq))
         if hq_df.empty:
             log.warning('{} hq data:{} is empty!'.format(symbol, FREQ[frequency]))
@@ -623,6 +623,30 @@ def build_one_instrument_segments(symbol, frequency, instrument='index'):
         return False
 
 
+def build_one_instrument_blocks(symbol, frequency, instrument='index'):
+    """
+    只对单交易品种的一个频率进行处理
+    :param symbol: 交易代码
+    :param frequency: 频率值，从0-9，从tick到year
+    :param instrument: 交易品种类型 future option stock bond convertible index
+    :return:
+    """
+    conn = connect_mongo('quote')
+    block_cursor = conn['block']
+    inst_cursor = conn[instrument]
+
+    filter_dict = {'symbol': symbol, 'frequency': frequency}
+    last_doc = block_cursor.find_one(filter_dict, sort=[('datetime', -1)])
+
+    #  只有一个记录或者没有记录要从头开始取数据
+    if last_doc:
+        log.info("Build {} future block from trade beginning.".format(symbol))
+    else:
+        update = last_doc['enter_date']
+        filter_dict['enter_date'] = {'$gte': update}
+        log.info("Build {} future block from {}".format(symbol, update))
+
+
 def build_segments():
     # 更新指数数据
     # build_future_index()
@@ -648,7 +672,9 @@ def build_segments():
         bflag = True
         while bflag and frequency < 10:
             bflag = build_one_instrument_segments(symbol, frequency, instrument='index')
-            frequency += 1
+            if bflag:
+                build_one_instrument_blocks(symbol, frequency, instrument='index')
+                frequency += 1
 
 
 def get_segment(symbol=None, start_date=None, end_date=None, frequency='d'):
