@@ -144,9 +144,11 @@ def identify_blocks_relation(block_df: pd.DataFrame):
 
     # block_relation_df = block_df[block_df['segment_num'] > 3].diff()[1:]
     temp_df = block_df.copy()
-    temp_df['type'] = np.nan
-    temp_df['relation'] = np.nan
-    temp_df['sn'] = 0
+
+    if 'type' not in temp_df.columns:
+        temp_df['type'] = np.nan
+        temp_df['relation'] = np.nan
+        temp_df['sn'] = 0
 
     type_index = temp_df.columns.get_loc('type')
     relation_index = temp_df.columns.get_loc('relation')
@@ -158,7 +160,7 @@ def identify_blocks_relation(block_df: pd.DataFrame):
     prev_lowest = temp_df.block_lowest[0]
     prev_segment_num = temp_df.segment_num[0]
 
-    block_index = 0
+    block_index = temp_df.iloc[0, sn_index]
     block_type = block_relation = np.nan
 
     last_index = len(temp_df) - 1
@@ -634,11 +636,11 @@ def build_one_instrument_blocks(symbol, frequency):
     last_2_docs_df = pd.DataFrame(list(last_2_docs))
     filter_dict['frequency'] = {'$gte': frequency}
     if last_2_docs_df.empty or len(last_2_docs_df) == 1:
-        filter_dict['datetime'] = {'$lte': datetime(2000, 5, 31)}
+        # filter_dict['datetime'] = {'$lte': datetime(2000, 5, 31)}
         log.info("Build {} future block from trade beginning.".format(symbol))
     else:
         update = last_2_docs_df['enter_date'].iloc[0]
-        filter_dict['datetime'] = {'$gte': update, '$lte': datetime(2000, 6, 23)}
+        filter_dict['datetime'] = {'$gte': update}
         log.info("Build {} block from {}".format(symbol, update))
 
     segments = segment_cursor.find(filter_dict, sort=[('datetime', 1)])
@@ -724,11 +726,58 @@ def build_segments():
         while bflag and frequency < 10:
             bflag = build_one_instrument_segments(symbol, frequency, instrument='index')
             if bflag:
-                build_one_instrument_blocks(symbol, frequency, instrument='index')
+                build_one_instrument_blocks(symbol, frequency)
                 frequency += 1
 
 
-def get_segment(symbol=None, start_date=None, end_date=None, frequency='d'):
+# --------------------------------从数据库读取数据--------------------------------------
+def get_blocks(symbol=None, start_date=None, end_date=None, frequency='d'):
+    """
+        获取行情数据
+    :param symbol: 合约代码，symbol, symbol list, 只支持同种类.
+    :param start_date:
+    :param end_date:    结束日期，交易使用时，默认为策略当前日期前一天
+    :param frequency:   历史数据的频率, 默认为'd', 只支持日线级别以上数据。'5m'代表5分钟线。    :return:
+        传入一个symbol，多个fields，函数会返回一个pandas DataFrame
+        传入一个symbol，一个field，函数会返回pandas Series
+        传入多个symbol，一个field，函数会返回一个pandas DataFrame
+        传入多个symbol，函数会返回一个multiIndexe DataFrame
+    """
+    # 连接数据库
+    conn = connect_mongo(db='quote', username=DATA_ANALYST, password=ANALYST_PWD)
+
+    cursor = conn['block']
+
+    frequency = FREQ.index(frequency)
+
+    filter_dict = {'frequency': frequency}
+
+    if isinstance(symbol, list):
+        filter_dict['symbol'] = {'$in': symbol}
+    elif isinstance(symbol, str):
+        filter_dict['symbol'] = symbol
+    else:
+        log.debug('Return all commodities blocks!')
+
+    if start_date is not None:
+        filter_dict['datetime'] = {'$gte': start_date}
+
+    if end_date is not None:
+        if 'datetime' in filter_dict:
+            filter_dict['enter_date']['$lte'] = end_date
+        else:
+            filter_dict['enter_date'] = {'$lte': end_date}
+
+    project_dict = {'_id': 0}
+
+    blocks = cursor.find(filter_dict, project_dict)
+
+    # Expand the cursor and construct the DataFrame
+    block_df = pd.DataFrame(list(blocks))
+    return block_df
+
+
+def get_segments(symbol=None, start_date=None, end_date=None, frequency='d'):
     """
         获取行情数据
     :param symbol: 合约代码，symbol, symbol list, 只支持同种类.
@@ -782,8 +831,8 @@ if __name__ == "__main__":
     start = datetime(2018, 6, 29)
     end = datetime(2019, 3, 1)
 
-    # build_segments()
-    build_one_instrument_blocks('A88', 5)
+    build_segments()
+    # build_one_instrument_blocks('A88', 5)
     # observation = 250
     # start = today - timedelta(observation)
     # end = today - timedelta(7)
