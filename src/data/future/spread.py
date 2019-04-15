@@ -8,7 +8,7 @@ import re
 from src.data.future.setting import SPREAD_DIR
 from src.data.future.utils import get_download_file_index
 from log import LogHandler
-from src.data.util import get_html_tree
+from src.util import get_html_tree
 
 log = LogHandler('future.log')
 

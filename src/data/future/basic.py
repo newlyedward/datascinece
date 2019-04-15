@@ -8,7 +8,7 @@ from log import LogHandler
 from src.data.setting import PROCESSED_DATA_DIR, DATE_PATTERN
 from src.data.future.setting import SPREAD_DIR, CODE2NAME_TABLE
 from src.data.future.spread import get_future_spreads
-from src.data.util import convert_percent
+from src.util import convert_percent
 
 log = LogHandler('future.log')
 

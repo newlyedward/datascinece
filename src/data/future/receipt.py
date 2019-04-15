@@ -9,7 +9,7 @@ import re
 from src.data.future.setting import RECEIPT_DIR
 from src.data.future.utils import get_download_file_index
 from log import LogHandler
-from src.data.util import get_html_text
+from src.util import get_html_text
 
 log = LogHandler('future.log')
 

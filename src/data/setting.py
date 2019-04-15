@@ -2,10 +2,7 @@
 from pathlib import Path
 from datetime import datetime, timedelta
 
-# MONGODB_URI = '192.168.2.88'
-# MONGODB_PORT = 27018
-
-INSTRUMENT_TYPE = ['future', 'option', 'stock', 'bond', 'convertible']
+from src.api.cons import INSTRUMENT_TYPE
 
 HOME_DIR = Path(__file__).parent.parent.parent
 RAW_DATA_DIR = HOME_DIR / 'data/raw'

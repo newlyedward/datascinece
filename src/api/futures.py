@@ -3,63 +3,10 @@ import pandas as pd
 
 from datetime import datetime
 
-from src.data.util import connect_mongo
-from src.setting import DATA_ANALYST, ANALYST_PWD
+from src.util import connect_mongo
 from log import LogHandler
 
-log = LogHandler('data.log')
-
-
-def get_price(symbol=None, instrument='index', start_date=None, end_date=None, frequency='d', fields=None):
-    """
-        获取行情数据
-    :param symbol: 合约代码，symbol, symbol list, 只支持同种类。获取tick数据时，只支持单个symbol
-    :param instrument:   行情数据类型 ['future', 'option', 'stock', 'bond', 'convertible'] 以及 index
-    :param start_date:
-    :param end_date:    结束日期，交易使用时，默认为策略当前日期前一天
-    :param frequency:   历史数据的频率, 默认为'd', 只支持日线级别以上数据。'5m'代表5分钟线。可支持期货tick级别数据获取，此时频率为'tick'
-    :param fields:      字段名称
-    :return:
-        传入一个symbol，多个fields，函数会返回一个pandas DataFrame
-        传入一个symbol，一个field，函数会返回pandas Series
-        传入多个symbol，一个field，函数会返回一个pandas DataFrame
-        传入多个symbol，函数会返回一个multiIndexe DataFrame
-    """
-    # 连接数据库
-    conn = connect_mongo(db='quote', username=DATA_ANALYST, password=ANALYST_PWD)
-
-    cursor = conn[instrument]
-
-    filter_dict = {}
-    if isinstance(symbol, list):
-        filter_dict['symbol'] = {'$in': symbol}
-    elif isinstance(symbol, str):
-        filter_dict['symbol'] = symbol
-    else:
-        log.debug('Return all commodities hq!')
-
-    if start_date is not None:
-        filter_dict['datetime'] = {'$gte': start_date}
-
-    if end_date is not None:
-        if 'datetime' in filter_dict:
-            filter_dict['datetime']['$lte'] = end_date
-        else:
-            filter_dict['datetime'] = {'$lte': end_date}
-
-    project_dict = {'_id': 0}
-    if isinstance(fields, str):
-        project_dict.update({'datetime': 1, fields: 1, 'symbol': 1})
-    elif isinstance(fields, list):
-        project_dict['datetime'] = 1
-        project_dict.update({x: 1 for x in fields})
-        project_dict['symbol'] = 1
-
-    hq = cursor.find(filter_dict, project_dict)
-
-    # Expand the cursor and construct the DataFrame
-    hq_df = pd.DataFrame(list(hq))
-    return hq_df
+log = LogHandler('api.log')
 
 
 def get_dominant(code, start_date=None, end_date=None):
@@ -161,4 +108,4 @@ if __name__ == '__main__':
     # df = get_dominant('CU', start_date=start, end_date=end)
     # df = get_dominant('CU', end_date=start)
     # df = get_price(['CU88', 'M88'], start_date=start, end_date=end, fields=['open', 'close'])
-    df = get_price('A88', end_date=end)
+

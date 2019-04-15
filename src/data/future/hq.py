@@ -9,7 +9,7 @@ import pandas as pd
 from src.data.future.setting import HQ_COLUMNS_PATH, CODE2NAME_TABLE
 from src.data.future.utils import get_download_file_index, get_insert_mongo_files
 from src.data.setting import RAW_HQ_DIR, INSTRUMENT_TYPE
-from src.data.util import get_post_text, get_html_text, connect_mongo
+from src.util import get_post_text, get_html_text, connect_mongo
 from log import LogHandler
 
 # TIME_WAITING = 1

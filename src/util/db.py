@@ -8,7 +8,7 @@ from log import LogHandler
 log = LogHandler('data.log')
 
 # client = MongoClient("mongodb+srv://unistar:<password>@cluster0-y9smy.mongodb.net/test?retryWrites=true")
-# db = client.test
+# api = client.test
 
 
 def connect_mongo(db, username=DATA_COLLECTOR, password=COLLECTOR_PWD, host=MONGODB_URI, port=MONGODB_PORT):

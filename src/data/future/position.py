@@ -11,7 +11,7 @@ import re
 
 from src.data.future.utils import get_future_calender
 from log import LogHandler
-from src.data.util import get_html_text
+from src.util import get_html_text
 from src.data.setting import RAW_DATA_DIR
 
 log = LogHandler('future.log')

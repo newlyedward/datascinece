@@ -14,14 +14,12 @@ import scipy.signal as signal
 
 # TODO 改用动态接口
 # get_history_hq_api(code, start=None, end=None, freq='d')
-from src.data.future.hq import build_future_index
 from src.data.tdx import get_future_hq
-from src.data.util import connect_mongo
+from src.util import connect_mongo
 from src.setting import DATA_ANALYST, ANALYST_PWD
+from src.api.cons import FREQ
 
 get_history_hq_api = get_future_hq
-
-FREQ = ('tick', '1m', '5m', '30m', 'h', 'd', 'w', 'm', 'q', 'y')
 
 log = LogHandler('features.log')
 
@@ -652,7 +650,7 @@ def build_one_instrument_blocks(symbol, frequency):
     block_df = identify_blocks(segment_df)
 
     if block_df.empty:
-        log.info("There is no new {} block from {}".format(symbol, update))
+        log.info("There is no new {} block.".format(symbol))
         return False
 
     block_df['frequency'] = frequency
