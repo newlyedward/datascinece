@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import pandas as pd
 import re
+from datetime  import datetime, timedelta
 
 from src.util import connect_mongo
 from src.api.cons import FREQ
@@ -95,11 +96,11 @@ def get_price(symbol=None, instrument='index', start_date=None, end_date=None, f
     return hq_df
 
 
-def get_snapshot_start_date(symbol=None, frequency='m', type=None, skip=1):
+def get_snapshot_start_date(symbol=None, frequency='m', peak_type=None, skip=1):
     """
-        获取行情数据
+        返回某个趋势极值点的位置，作为分析的起点
     :param symbol: 合约代码，symbol, symbol list
-    :param type:        'down' 底部 'up' 顶部  None 任意极值点
+    :param peak_type:        'down' 底部 'up' 顶部  None 任意极值点
     :param skip:        0 倒数第一个
     :param frequency:   历史数据的频率, 默认为'm', 分析月线的趋势
     :return:
@@ -110,7 +111,7 @@ def get_snapshot_start_date(symbol=None, frequency='m', type=None, skip=1):
 
     cursor = conn['block']
 
-    stages = [
+    pipeline = [
         {
             '$match': {
                 'symbol': {
@@ -121,52 +122,95 @@ def get_snapshot_start_date(symbol=None, frequency='m', type=None, skip=1):
             }
         }, {
             '$project': {
-                'enter_date': 1,
+                'start_date': 1,
                 'symbol': 1
             }
         }, {
             '$sort': {
-                'enter_date': -1
+                'start_date': -1
             }
         }, {
             '$group': {
                 '_id': '$symbol',
-                'enter_date': {
-                    '$push': '$enter_date'
+                'start_date': {
+                    '$push': '$start_date'
                 }
             }
         }
     ]
 
-    if type is not None:
+    match_stage = pipeline[0]['$match']
+    if peak_type is not None:
+        match_stage['type'] = peak_type
 
-    filter_dict = {}
     if isinstance(symbol, list):
-        filter_dict['symbol'] = {'$in': symbol}
+        match_stage['symbol'] = {'$in': symbol}
     elif isinstance(symbol, str):
-        filter_dict['symbol'] = symbol
+        match_stage['symbol'] = symbol
     else:
-        log.debug('Return all commodities hq!')
+        log.debug('Search all instruments snapshot start datetime!')
 
-    if start_date is not None:
-        filter_dict['datetime'] = {'$gte': start_date}
+    dates = list(cursor.aggregate(pipeline))
 
-    if end_date is not None:
-        if 'datetime' in filter_dict:
-            filter_dict['datetime']['$lte'] = end_date
-        else:
-            filter_dict['datetime'] = {'$lte': end_date}
+    if len(dates) == 0:
+        log.info('None of snapshot dates return!')
+        return dates
+    return [dict(symbol=date['_id'], start_date=date['start_date'][skip] if len(date['start_date']) > skip else None)
+            for date in dates]
 
-    project_dict = {'_id': 0}
-    if isinstance(fields, str):
-        project_dict.update({'datetime': 1, fields: 1, 'symbol': 1})
-    elif isinstance(fields, list):
-        project_dict['datetime'] = 1
-        project_dict.update({x: 1 for x in fields})
-        project_dict['symbol'] = 1
 
-    hq = cursor.find(filter_dict, project_dict)
+def get_instrument_symbols(by='amount', threshold=100000000, instrument='future'):
+    """
 
-    # Expand the cursor and construct the DataFrame
-    hq_df = pd.DataFrame(list(hq))
-    return hq_df
+    :param by:过滤的因子
+    :param threshold:过滤的阈值
+    :return:
+    """
+    conn = connect_mongo(db='quote', username=DATA_ANALYST, password=ANALYST_PWD)
+
+    pipeline = [
+        {
+            '$match': {
+                by: {
+                    '$gt': threshold
+                },
+                'datetime': {
+                    '$gt': datetime.today() - timedelta(60)    # 选取一周内有交易的品种
+                }
+            }
+        }, {
+            '$sort': {
+                'datetime': -1
+            }
+        }, {
+            '$group': {
+                '_id': '$symbol',
+                'datetime': {
+                    '$first': '$datetime'
+                },
+                by: {
+                    '$first': '$'+by
+                }
+            }
+        }
+    ]
+
+    match_stage = pipeline[0]['$match']
+    cursor = conn['index']
+    if instrument == 'future':
+        match_stage['symbol'] = {'$regex': re.compile(r"88$")}
+    else:
+        pass
+
+    symbol_list = list(cursor.aggregate(pipeline))
+    # 剔除某一天超过阈值的
+    if len(symbol_list) == 0:
+        log.info('None of snapshot dates return!')
+        return symbol_list
+    return [symbol['_id'] for symbol in symbol_list]
+
+
+if __name__ == '__main__':
+    symbols = ['A88', 'Y88', 'ME88']
+    # start_dates = get_snapshot_start_date(symbol=symbols)
+    get_instrument_symbols(by='amount')
