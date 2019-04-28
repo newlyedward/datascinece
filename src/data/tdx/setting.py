@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-tdx_dir = "D:\\Trade\\TDX\\"
+tdx_dir = "E:\\TDX\\"
 
 MARKETS = ('cffex',  # 中金所
            'czce',  # 郑州商品交易所

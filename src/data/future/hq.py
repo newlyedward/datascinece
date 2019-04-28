@@ -6,7 +6,7 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
-from src.data.future.setting import HQ_COLUMNS_PATH, CODE2NAME_TABLE
+from src.data.future.setting import NAME2CODE_MAP, COLUMNS_MAP
 from src.data.future.utils import get_download_file_index, get_insert_mongo_files
 from src.data.setting import RAW_HQ_DIR, INSTRUMENT_TYPE
 from src.util import get_post_text, get_html_text, connect_mongo
@@ -16,6 +16,7 @@ from log import LogHandler
 log = LogHandler('data.log')
 
 
+# ----------------------------------download data from web-----------------
 def is_data_empty(data):
     """
     判断数据是否存在
@@ -232,22 +233,325 @@ def download_hq_by_dates(market, category=0):
     return True
 
 
-def split_symbol(pattern, df):
+def convert_deliver(symbol, date):
+    """
+    从合约代码中提取交割月份数据
+    :param symbol: 
+    :param date: 
+    :return: 
+    """
+
+    if not isinstance(symbol, str):
+        symbol = str(symbol).strip()
+    m = re.search('\d{3,4}$', symbol.strip())[0]
+    if len(m) == 4:
+        return m
+
+    if m[0] == '0':
+        y = date.year
+        y = int(y - np.floor(y / 100) * 100 + 1)
+        m = str(y) + m[-2:]
+    else:
+        m = date.strftime('%y')[0] + m
+
+    return m
+
+
+def data_type_conversion(data, category, columns, names, date, market):
+    """
+    数据类型转换，将str转换为数字类型
+    :param market:
+    :param date:
+    :param names:
+    :param columns:
+    :param category: 行情类型
+    :param data:
+    :return:
+    """
+    hq_df = data.copy()
+
+    # 截取所需字段，并将字段名转换为统一标准
+    hq_df = hq_df[columns]
+    hq_df.columns = names
+    hq_df = hq_df.dropna()
+
+    hq_df['datetime'] = date
+    hq_df['market'] = market
+
+    hq_df['open'] = pd.to_numeric(hq_df['open'], downcast='float')
+    hq_df['close'] = pd.to_numeric(hq_df['close'], downcast='float')
+    hq_df['high'] = pd.to_numeric(hq_df['high'], downcast='float')
+    hq_df['low'] = pd.to_numeric(hq_df['low'], downcast='float')
+    hq_df['settle'] = pd.to_numeric(hq_df['settle'], downcast='float')
+
+    hq_df['volume'] = pd.to_numeric(hq_df['volume'], downcast='integer')
+    hq_df['openInt'] = pd.to_numeric(hq_df['openInt'], downcast='integer')
+
+    # 行权量和delta只有期权独有
+    if category == 1:
+        hq_df['exevolume'] = pd.to_numeric(hq_df['exevolume'], downcast='integer')
+        hq_df['delta'] = pd.to_numeric(hq_df['delta'], downcast='float')
+
+    return hq_df
+
+
+def transfer_dce_future_hq(date, file_path, columns_map):
+    """
+    将每天的数据统一标准
+    :return: pd.DataFrame 统一标准后的数据
+    """
+    ret = pd.DataFrame()
+
+    hq_df = pd.read_csv(file_path, encoding='gb2312', header=0, index_col=False,
+                        sep='\s+', thousands=',')
+
+    bflag = hq_df.empty or len(hq_df.columns) < len(columns_map) or len(hq_df.columns) > 20
+    if bflag:  # 原始数据文件为null，不重新下载，需要再运行一次程序
+        print('dce future hq data:{} is not exist, please rerun program!'.format(file_path.name))
+        return ret
+
+    hq_df = data_type_conversion(hq_df, 0, list(columns_map.values()), list(columns_map.keys()), date, 'dce')
+
+    # 商品字母缩写转换
+    hq_df['code'] = hq_df['code'].transform(lambda x: NAME2CODE_MAP['exchange'][x])
+
+    # 构建symbol
+    hq_df['symbol'] = hq_df['code'] + hq_df['symbol'].transform(lambda x: convert_deliver(x, date))
+
+    hq_df['amount'] = pd.to_numeric(hq_df['amount'], downcast='float') * 10000
+
+    return hq_df
+
+
+def transfer_czce_future_hq(date, file_path, columns_map):
+    """
+    将每天的数据统一标准
+    :return: pd.DataFrame 统一标准后的数据
+    """
+    ret = pd.DataFrame()
+
+    hq_df = pd.read_csv(file_path, encoding='gb2312', header=0, index_col=False)
+
+    bflag = hq_df.empty or len(hq_df.columns) < len(columns_map) or len(hq_df.columns) > 20
+    if bflag:  # 原始数据文件为null，不重新下载，需要再运行一次程序
+        print('dce future hq data:{} is not exist, please rerun program!'.format(file_path.name))
+        return ret
+
+    if date < datetime(2010, 8, 24):
+        columns_map['volume'] = columns_map['volume'][0]
+    else:
+        columns_map['volume'] = columns_map['volume'][1]
+
+    # 商品字母缩写转换
+    split_re, index = split_symbol('^[a-zA-Z]{1,2}', hq_df[columns_map['symbol']])
+    hq_df = hq_df if all(index) else hq_df[index]  # 删除非数据行
+
+    hq_df = data_type_conversion(hq_df, 0, list(columns_map.values()), list(columns_map.keys()), date, 'czce')
+
+    hq_df['code'] = split_re.transform(
+        lambda x: NAME2CODE_MAP['exchange'][x[0]] if x[0] in NAME2CODE_MAP['exchange'].keys() else x[0])
+
+    # 构建symbol
+    hq_df['symbol'] = hq_df['code'] + hq_df['symbol'].transform(lambda x: convert_deliver(x, date))
+
+    hq_df['amount'] = pd.to_numeric(hq_df['amount'], downcast='float') * 10000
+
+    return hq_df
+
+
+def transfer_shfe_future_hq(date, file_path, columns_map):
+    """
+    将每天的数据统一标准
+    :return: pd.DataFrame 统一标准后的数据
+    """
+    ret = pd.DataFrame()
+
+    data = json.loads(file_path.read_text())
+    hq_df = pd.DataFrame(data['o_curinstrument'])
+    total_df = pd.DataFrame(data['o_curproduct'])
+
+    bflag = hq_df.empty or len(hq_df.columns) < len(columns_map) or len(hq_df.columns) > 20
+    if bflag:  # 原始数据文件为null，不重新下载，需要再运行一次程序
+        print('dce future hq data:{} is not exist, please rerun program!'.format(file_path.name))
+        return ret
+
+    hq_df = hq_df[hq_df['settle'] != '']
+
+    hq_df = data_type_conversion(hq_df, 0, list(columns_map.values()), list(columns_map.keys()), date, 'czce')
+    hq_df.loc[:, 'code'] = hq_df['code'].str.strip()
+    # 商品字母缩写转换
+    hq_df['code'] = hq_df['code'].transform(lambda x: NAME2CODE_MAP['exchange'][x])
+
+    # 构建symbol
+    hq_df['symbol'] = hq_df['code'] + hq_df['symbol'].transform(lambda x: convert_deliver(x, date))
+
+    # 计算amount
+    total_df['code'] = total_df['PRODUCTNAME'].transform(lambda x: NAME2CODE_MAP['exchange'][x])
+    total_df['multiplier'] = pd.to_numeric(
+        total_df['TURNOVER'] / total_df['AVGPRICE'] / total_df['VOLUME'] * 100000000, downcast='int')
+
+    hq_df = hq_df.join(total_df[['code', ['multiplier']]], on='commodity')
+    hq_df['amount'] = hq_df['volume'] * hq_df['settle'] * hq_df['multiplier']
+    del hq_df['multiplier']
+
+    return hq_df
+
+
+def transfer_cffex_future_hq(date, file_path, columns_map):
+    """
+    将每天的数据统一标准
+    :return: pd.DataFrame 统一标准后的数据
+    """
+    ret = pd.DataFrame()
+
+    hq_df = pd.read_csv(file_path, encoding='gb2312', header=0, index_col=False)
+
+    bflag = hq_df.empty or len(hq_df.columns) < len(columns_map) or len(hq_df.columns) > 20
+    if bflag:  # 原始数据文件为null，不重新下载，需要再运行一次程序
+        print('dce future hq data:{} is not exist, please rerun program!'.format(file_path.name))
+        return ret
+
+    # 商品字母缩写转换
+    split_re, index = split_symbol('^[a-zA-Z]{1,2}', hq_df[columns_map['symbol']])
+    hq_df = hq_df if all(index) else hq_df[index]
+    hq_df['code'] = split_re.transform(lambda x: x[0])
+
+    hq_df = data_type_conversion(hq_df, 0, list(columns_map.values()), list(columns_map.keys()), date, 'cffex')
+
+    hq_df['amount'] = pd.to_numeric(hq_df['amount'], downcast='float') * 10000
+
+    return hq_df
+
+
+def split_symbol(pattern, s):
     """
     对合约代码分析，并用正则表达式进行提取
+            期货：商品代码
+            期权：商品代码，期货合约代码，期权类型和行权价格
     :param pattern: 正则表达式
-    :param df: 行情数据，包含'symbol columns'
+    :param s: symbol columns
     :return:
         pd.Series, idx 提取出信息对应的索引bool值
     """
-    split_s = df['symbol'].transform(lambda x: re.search(pattern, x))
-    idx = [True]
-    if split_s.isna().any():
-        idx = ~split_s.isna().values
+    split_s = s.transform(lambda x: re.search(pattern, x))
+    idx = ~split_s.isna().values
+    if not idx.all():
         split_s = split_s.dropna()
-        log.warning(
-            "There are some Nan in re search!")
+        log.warning("There are some Nan in re search!")
     return split_s, idx
+
+
+def transfer_dce_option_hq(date, file_path, columns_map):
+    """
+    将每天的数据统一标准
+    :return: pd.DataFrame 统一标准后的数据
+    """
+    ret = pd.DataFrame()
+
+    hq_df = pd.read_csv(file_path, encoding='gb2312', header=0, index_col=False,
+                        sep='\s+', thousands=',')
+
+    bflag = hq_df.empty or len(hq_df.columns) < len(columns_map) or len(hq_df.columns) > 20
+    if bflag:  # 原始数据文件为null，不重新下载，需要再运行一次程序
+        print('dce future hq data:{} is not exist, please rerun program!'.format(file_path.name))
+        return ret
+
+    # 商品字母缩写转换
+    hq_df.loc[:, 'symbol'] = hq_df['symbol'].str.upper() \
+        .str.replace('-', '').str.strip()
+
+    pattern = '^([A-Z]{1,2})(\d{3,4})-?([A-Z])-?(\d+)'
+    split_re, index = split_symbol(pattern, hq_df)
+    hq_df = hq_df if all(index) else hq_df[index]
+
+    hq_df = data_type_conversion(hq_df, 1, list(columns_map.values()), list(columns_map.keys()), date, 'dce')
+
+    hq_df['code'] = split_re.transform(lambda x: x[1])
+    hq_df['future_symbol'] = split_re.transform(
+        lambda x: x[1] + (x[2] if len(x[2]) == 4 else '0{}'.format(x[2])))
+    hq_df['type'] = split_re.transform(lambda x: x[3])
+    hq_df['exeprice'] = pd.to_numeric(split_re.transform(lambda x: x[4]), downcast='float')
+
+    hq_df['amount'] = pd.to_numeric(hq_df['amount'], downcast='float') * 10000
+    # dce 没有隐含波动率数据
+
+    return hq_df
+
+
+def transfer_czce_option_hq(date, file_path, columns_map):
+    """
+    将每天的数据统一标准
+    :return: pd.DataFrame 统一标准后的数据
+    """
+    ret = pd.DataFrame()
+
+    hq_df = pd.read_csv(file_path, encoding='gb2312', header=0, index_col=False)
+
+    bflag = hq_df.empty or len(hq_df.columns) < len(columns_map) or len(hq_df.columns) > 20
+    if bflag:  # 原始数据文件为null，不重新下载，需要再运行一次程序
+        print('dce future hq data:{} is not exist, please rerun program!'.format(file_path.name))
+        return ret
+
+    # 商品字母缩写转换
+    hq_df.loc[:, 'symbol'] = hq_df['symbol'].str.upper() \
+        .str.replace('-', '').str.strip()
+
+    pattern = '^([A-Z]{1,2})(\d{3,4})-?([A-Z])-?(\d+)'
+    split_re, index = split_symbol(pattern, hq_df)
+    hq_df = hq_df if all(index) else hq_df[index]
+
+    hq_df = data_type_conversion(hq_df, 1, list(columns_map.values()), list(columns_map.keys()), date, 'czce')
+
+    hq_df['code'] = split_re.transform(lambda x: x[1])
+    hq_df['future_symbol'] = split_re.transform(
+        lambda x: x[1] + (x[2] if len(x[2]) == 4 else '0{}'.format(x[2])))
+    hq_df['type'] = split_re.transform(lambda x: x[3])
+    hq_df['exeprice'] = pd.to_numeric(split_re.transform(lambda x: x[4]), downcast='float')
+
+    hq_df['amount'] = pd.to_numeric(hq_df['amount'], downcast='float') * 10000
+    hq_df['sigma'] = pd.to_numeric(hq_df['sigma'], downcast='float')
+
+    return hq_df
+
+
+def transfer_shfe_option_hq(date, file_path, columns_map):
+    """
+    将每天的数据统一标准
+    :return: pd.DataFrame 统一标准后的数据
+    """
+    ret = pd.DataFrame()
+
+    hq_df = pd.DataFrame(json.loads(file_path.read_text())['o_curinstrument'])
+
+    bflag = hq_df.empty or len(hq_df.columns) < len(columns_map) or len(hq_df.columns) > 20
+    if bflag:  # 原始数据文件为null，不重新下载，需要再运行一次程序
+        print('dce future hq data:{} is not exist, please rerun program!'.format(file_path.name))
+        return ret
+
+    # 处理上海市场的空格和多余行
+    hq_df = hq_df[hq_df['settle'] != '']
+    hq_df.loc[:, 'symbol'] = hq_df['symbol'].str.strip()
+
+    # 商品字母缩写转换
+    hq_df.loc[:, 'symbol'] = hq_df['symbol'].str.upper() \
+        .str.replace('-', '').str.strip()
+
+    pattern = '^([A-Z]{1,2})(\d{3,4})-?([A-Z])-?(\d+)'
+    split_re, index = split_symbol(pattern, hq_df)
+    hq_df = hq_df if all(index) else hq_df[index]
+
+    hq_df = data_type_conversion(hq_df, 1, list(columns_map.values()), list(columns_map.keys()), date, 'shfe')
+
+    hq_df['code'] = split_re.transform(lambda x: x[1])
+    hq_df['future_symbol'] = split_re.transform(
+        lambda x: x[1] + (x[2] if len(x[2]) == 4 else '0{}'.format(x[2])))
+    hq_df['type'] = split_re.transform(lambda x: x[3])
+    hq_df['exeprice'] = pd.to_numeric(split_re.transform(lambda x: x[4]), downcast='float')
+
+    hq_df['amount'] = pd.to_numeric(hq_df['amount'], downcast='float') * 10000
+    hq_df['sigma'] = pd.to_numeric(hq_df['sigma'], downcast='float')
+
+    return hq_df
 
 
 def transfer_exchange_data(file_row, market='dce', category=0):
@@ -266,17 +570,11 @@ def transfer_exchange_data(file_row, market='dce', category=0):
     file_path = file_row.filepath
     date = file_row.Index
 
-    cols_path = HQ_COLUMNS_PATH[category]
-
-    cols_df = pd.read_csv(cols_path, index_col=False, header=0,
-                          usecols=['columns', market], encoding='gb2312')
-    cols_df = cols_df.dropna()
-    columns = cols_df[market].values  # 需要读取的数据列
-    names = cols_df['columns'].values  # 对应的统一后的列的名称
-
-    # dtype = dict(cols_df[[market, 'dtype']].values)  # 每列对应转换的数据类型
+    columns_map = COLUMNS_MAP[INSTRUMENT_TYPE[category]][market]
     if market == 'czce' and date < datetime(2010, 8, 24) and category == 0:
-        cols_df.loc[cols_df['columns'] == 'volume', 'czce'] = '成交量'
+        columns_map['volume'] = columns_map['volume'][0]
+    columns = columns_map.values()  # 需要读取的数据列
+    names = columns_map.keys()  # 对应的统一后的列的名称
 
     # 读取需转换的原始数据文件
     if market == 'dce':  # text
@@ -302,17 +600,14 @@ def transfer_exchange_data(file_row, market='dce', category=0):
     if market == 'shfe':
         hq_df = hq_df[hq_df['settle'] != '']
         if category == 0:
-            hq_df.loc[:, 'commodity'] = hq_df['commodity'].str.strip()
+            hq_df.loc[:, 'code'] = hq_df['commodity'].str.strip()
         else:
             hq_df.loc[:, 'symbol'] = hq_df['symbol'].str.strip()
 
     # 商品字母缩写转换和合约代码组织
     if category == 0:
         if market in ['shfe', 'dce']:
-            code2name_table = CODE2NAME_TABLE.loc[CODE2NAME_TABLE['market'] == market, ['code', 'exchange']]
-            code2name_table.set_index('exchange', inplace=True)
-            hq_df = hq_df.join(code2name_table, on='commodity')
-            del hq_df['commodity']
+            hq_df['code'] = hq_df['code'].transform(lambda x: NAME2CODE_MAP['exchange'][x])
         elif market in ['czce', 'cffex']:
             split_re, index = split_symbol('^[a-zA-Z]{1,2}', hq_df)
             hq_df = hq_df if all(index) else hq_df[index]
@@ -321,25 +616,8 @@ def transfer_exchange_data(file_row, market='dce', category=0):
             log.info('Wrong exchange market name!')
             return ret
 
-        # 提取交割月份
-        def convert_deliver(x):
-            if not isinstance(x, str):
-                x = str(x).strip()
-            m = re.search('\d{3,4}$', x.strip())[0]
-            if len(m) == 4:
-                return m
-
-            if m[0] == '0':
-                y = date.year
-                y = int(y - np.floor(y / 100) * 100 + 1)
-                m = str(y) + m[-2:]
-            else:
-                m = date.strftime('%y')[0] + m
-
-            return m
-
         if market in ['dce', 'czce', 'shfe']:  # cffex symbol不需要转换
-            hq_df['symbol'] = hq_df['code'] + hq_df['symbol'].transform(convert_deliver)
+            hq_df['symbol'] = hq_df['code'] + hq_df['symbol'].transform(lambda x: convert_deliver(x, date))
 
     else:  # category = 1 期权
         hq_df.loc[:, 'symbol'] = hq_df['symbol'].str.upper() \
@@ -370,7 +648,7 @@ def transfer_exchange_data(file_row, market='dce', category=0):
         hq_df['delta'] = pd.to_numeric(hq_df['delta'], downcast='float')
 
     # 计算成交金额
-    if market == 'shfe' and category == 0:  # 这样计算的不准确，只能近似
+    if market == 'shfe' and category == 0:  # TODO 这样计算的不准确，只能近似，没有考虑合约乘数
         hq_df['amount'] = pd.to_numeric(hq_df['volume'] * hq_df['close'], downcast='float')
     else:
         hq_df['amount'] = pd.to_numeric(hq_df['amount'], downcast='float') * 10000
@@ -389,6 +667,20 @@ def insert_hq_to_mongo():
 
     conn = connect_mongo(db='quote')
 
+    transfer_exchange_hq_func = [
+        {
+            'cffex': transfer_cffex_future_hq,
+            'czce': transfer_czce_future_hq,
+            'shfe': transfer_shfe_future_hq,
+            'dce': transfer_dce_future_hq
+        },
+        {
+            'czce': transfer_czce_option_hq,
+            'shfe': transfer_shfe_option_hq,
+            'dce': transfer_dce_option_hq
+        }
+    ]
+
     for c in category:
         t = INSTRUMENT_TYPE[c]
         cursor = conn[t]
@@ -405,9 +697,9 @@ def insert_hq_to_mongo():
             if file_df.empty:
                 print('{} {} hq is updated before!'.format(m, t))
                 continue
-
+            columns_map = COLUMNS_MAP[t][m]
             for row in file_df.itertuples():
-                df = transfer_exchange_data(row, m, c)
+                df = transfer_exchange_hq_func[c][m](row.Index, row.filepath, columns_map)
                 if df.empty:
                     log.error("Transform {} {} {}data failure, please check program.".format(m, t, row.Index))
                     continue
@@ -419,6 +711,7 @@ def insert_hq_to_mongo():
             print('{} {} hq is updated now!'.format(m, t))
 
 
+# ----------hq数据更新后更新index数据------------------
 def build_weighted_index(hq_df, weight='volume'):
     """
     对行情数据求加权指数
@@ -451,7 +744,7 @@ def build_future_index():
     :return:
     """
     # 更新数据库行情数据
-    # insert_hq_to_mongo()
+    insert_hq_to_mongo()
 
     # 连接数据库
     conn = connect_mongo(db='quote')
@@ -468,7 +761,7 @@ def build_future_index():
     # 按品种分别编制指数
     for code in codes:
         # 获取指数数据最近的一条主力合约记录，判断依据是前一天的持仓量
-        last_doc = index_cursor.find_one({'symbol': code+'88'}, sort=[('datetime', -1)])
+        last_doc = index_cursor.find_one({'symbol': code + '88'}, sort=[('datetime', -1)])
 
         if last_doc:
             filter_dict = {'code': code, 'datetime': {'$gte': last_doc['datetime']}}
@@ -501,7 +794,7 @@ def build_future_index():
         hq_df.set_index(['datetime', 'symbol'], inplace=True)
 
         date_index = hq_df.index.levels[0]
-        if len(date_index) < 2:   # 新的数据
+        if len(date_index) < 2:  # 新的数据
             print('{} index data have been updated before!'.format(code))
             continue
 
@@ -513,13 +806,13 @@ def build_future_index():
             #   s = hq_df.loc[date, 'openInt'].copy()
             s = hq_df.loc[date, 'openInt'].copy()
             s.sort_values(ascending=False, inplace=True)
-            s = s[:min(3, len(s))]          # 预防合约小于3的情况,避免出现交割月和主力合约重合，主力合约和下月合约重合
+            s = s[:min(3, len(s))]  # 预防合约小于3的情况,避免出现交割月和主力合约重合，主力合约和下月合约重合
             domain = s.index[0]
             contract_df.loc[date, 'domain'] = domain
             s.sort_index(inplace=True)
             contract_df.loc[date, 'near'] = s.index[0]
             idx = s.index.get_loc(domain) + 1
-            if idx >= len(s):     # 远月合约持仓较少，不会存在换月情况，只会和交割月合约交换
+            if idx >= len(s):  # 远月合约持仓较少，不会存在换月情况，只会和交割月合约交换
                 log.debug('{}:{} Far month openInt is few.'.format(code, date.strftime('%Y-%m-%d')))
                 idx = len(s) - 1
             contract_df.loc[date, 'next'] = s.index[idx]
@@ -572,9 +865,10 @@ def build_future_index():
 
 
 if __name__ == '__main__':
+    print(datetime.now())
     # start_dt = datetime(2014, 12, 21)
     # end_dt = datetime(2005, 1, 4)
-    print(datetime.now())
+
     # download_czce_hq_by_date(end_dt)
     # get_dce_hq_by_dates(category=0)
     # download_hq_by_dates('cffex', category=0)
@@ -591,6 +885,6 @@ if __name__ == '__main__':
     # row = Pandas(Index=date, filepath=filepath)
     # df = transfer_exchange_data(row, market='shfe', category=1)
     # result = to_mongo('quote', 'option', df.to_dict('records'))
-    # insert_hq_to_mongo()
-    build_future_index()
+    insert_hq_to_mongo()
+    # build_future_index()
     print(datetime.now())
