@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
 import pandas as pd
-import re
-from datetime  import datetime, timedelta
 
 from src.util import connect_mongo
 from src.api.cons import FREQ
@@ -96,121 +94,98 @@ def get_price(symbol=None, instrument='index', start_date=None, end_date=None, f
     return hq_df
 
 
-def get_snapshot_start_date(symbol=None, frequency='m', peak_type=None, skip=1):
+def get_blocks(symbol=None, start_date=None, end_date=None, frequency='d'):
     """
-        返回某个趋势极值点的位置，作为分析的起点
-    :param symbol: 合约代码，symbol, symbol list
-    :param peak_type:        'down' 底部 'up' 顶部  None 任意极值点
-    :param skip:        0 倒数第一个
-    :param frequency:   历史数据的频率, 默认为'm', 分析月线的趋势
-    :return:
-        [{symbol:datetime}]   对应symbol的分析起始时间
+        获取行情数据
+    :param symbol: 合约代码，symbol, symbol list, 只支持同种类.
+    :param start_date:
+    :param end_date:    结束日期，交易使用时，默认为策略当前日期前一天
+    :param frequency:   历史数据的频率, 默认为'd', 只支持日线级别以上数据。'5m'代表5分钟线。    :return:
+        传入一个symbol，多个fields，函数会返回一个pandas DataFrame
+        传入一个symbol，一个field，函数会返回pandas Series
+        传入多个symbol，一个field，函数会返回一个pandas DataFrame
+        传入多个symbol，函数会返回一个multiIndexe DataFrame
     """
     # 连接数据库
     conn = connect_mongo(db='quote', username=DATA_ANALYST, password=ANALYST_PWD)
 
     cursor = conn['block']
 
-    pipeline = [
-        {
-            '$match': {
-                'symbol': {
-                    '$regex': re.compile(r"88$")
-                },
-                'frequency': FREQ.index(frequency),
-                'sn': 0
-            }
-        }, {
-            '$project': {
-                'start_date': 1,
-                'symbol': 1
-            }
-        }, {
-            '$sort': {
-                'start_date': -1
-            }
-        }, {
-            '$group': {
-                '_id': '$symbol',
-                'start_date': {
-                    '$push': '$start_date'
-                }
-            }
-        }
-    ]
+    frequency = FREQ.index(frequency)
 
-    match_stage = pipeline[0]['$match']
-    if peak_type is not None:
-        match_stage['type'] = peak_type
+    filter_dict = {'frequency': frequency}
 
     if isinstance(symbol, list):
-        match_stage['symbol'] = {'$in': symbol}
+        filter_dict['symbol'] = {'$in': symbol}
     elif isinstance(symbol, str):
-        match_stage['symbol'] = symbol
+        filter_dict['symbol'] = symbol
     else:
-        log.debug('Search all instruments snapshot start datetime!')
+        log.debug('Return all commodities blocks!')
 
-    dates = list(cursor.aggregate(pipeline))
+    if start_date is not None:
+        filter_dict['datetime'] = {'$gte': start_date}
 
-    if len(dates) == 0:
-        log.info('None of snapshot dates return!')
-        return dates
-    return [dict(symbol=date['_id'], start_date=date['start_date'][skip] if len(date['start_date']) > skip else None)
-            for date in dates]
+    if end_date is not None:
+        if 'datetime' in filter_dict:
+            filter_dict['enter_date']['$lte'] = end_date
+        else:
+            filter_dict['enter_date'] = {'$lte': end_date}
+
+    project_dict = {'_id': 0}
+
+    blocks = cursor.find(filter_dict, project_dict)
+
+    # Expand the cursor and construct the DataFrame
+    block_df = pd.DataFrame(list(blocks))
+    return block_df
 
 
-def get_instrument_symbols(by='amount', threshold=100000000, instrument='future'):
+def get_segments(symbol=None, start_date=None, end_date=None, frequency='d'):
     """
-
-    :param by:过滤的因子
-    :param threshold:过滤的阈值
-    :return:
+        获取行情数据
+    :param symbol: 合约代码，symbol, symbol list, 只支持同种类.
+    :param start_date:
+    :param end_date:    结束日期，交易使用时，默认为策略当前日期前一天
+    :param frequency:   历史数据的频率, 默认为'd', 只支持日线级别以上数据。'5m'代表5分钟线。    :return:
+        传入一个symbol，多个fields，函数会返回一个pandas DataFrame
+        传入一个symbol，一个field，函数会返回pandas Series
+        传入多个symbol，一个field，函数会返回一个pandas DataFrame
+        传入多个symbol，函数会返回一个multiIndexe DataFrame
     """
+    # 连接数据库
     conn = connect_mongo(db='quote', username=DATA_ANALYST, password=ANALYST_PWD)
 
-    pipeline = [
-        {
-            '$match': {
-                by: {
-                    '$gt': threshold
-                },
-                'datetime': {
-                    '$gt': datetime.today() - timedelta(60)    # 选取一周内有交易的品种
-                }
-            }
-        }, {
-            '$sort': {
-                'datetime': -1
-            }
-        }, {
-            '$group': {
-                '_id': '$symbol',
-                'datetime': {
-                    '$first': '$datetime'
-                },
-                by: {
-                    '$first': '$'+by
-                }
-            }
-        }
-    ]
+    cursor = conn['segment']
 
-    match_stage = pipeline[0]['$match']
-    cursor = conn['index']
-    if instrument == 'future':
-        match_stage['symbol'] = {'$regex': re.compile(r"88$")}
+    frequency = FREQ.index(frequency)
+
+    filter_dict = {'frequency': {'$gte': frequency}}
+
+    if isinstance(symbol, list):
+        filter_dict['symbol'] = {'$in': symbol}
+    elif isinstance(symbol, str):
+        filter_dict['symbol'] = symbol
     else:
-        pass
+        log.debug('Return all commodities segments!')
 
-    symbol_list = list(cursor.aggregate(pipeline))
-    # 剔除某一天超过阈值的
-    if len(symbol_list) == 0:
-        log.info('None of snapshot dates return!')
-        return symbol_list
-    return [symbol['_id'] for symbol in symbol_list]
+    if start_date is not None:
+        filter_dict['datetime'] = {'$gte': start_date}
+
+    if end_date is not None:
+        if 'datetime' in filter_dict:
+            filter_dict['datetime']['$lte'] = end_date
+        else:
+            filter_dict['datetime'] = {'$lte': end_date}
+
+    project_dict = {'_id': 0}
+
+    segments = cursor.find(filter_dict, project_dict)
+
+    # Expand the cursor and construct the DataFrame
+    segment_df = pd.DataFrame(list(segments))
+    return segment_df
 
 
 if __name__ == '__main__':
     symbols = ['A88', 'Y88', 'ME88']
     # start_dates = get_snapshot_start_date(symbol=symbols)
-    get_instrument_symbols(by='amount')

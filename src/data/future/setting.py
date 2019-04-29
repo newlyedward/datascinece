@@ -201,7 +201,7 @@ COLUMNS_MAP = {
                 },
             "dce":
                 {
-                    "commodity": "商品名称",
+                    # "commodity": "商品名称",
                     "symbol": "合约名称",
                     "open": "开盘价",
                     "high": "最高价",
@@ -216,7 +216,7 @@ COLUMNS_MAP = {
                 },
             "shfe":
                 {
-                    "commodity": "PRODUCTNAME",
+                    # "commodity": "PRODUCTNAME",
                     "symbol": "INSTRUMENTID",
                     "open": "OPENPRICE",
                     "high": "HIGHESTPRICE",
@@ -228,7 +228,7 @@ COLUMNS_MAP = {
                     "settle": "SETTLEMENTPRICE",
                     "exevolume": "EXECVOLUME",
                     "delta": "DELTA",
-                    "sigma": "SIGMA"
+                    # "sigma": "SIGMA"
                 }
         }
 }
