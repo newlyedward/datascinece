@@ -2,6 +2,7 @@ import re
 from datetime import datetime, timedelta
 
 from src.api import FREQ
+from src.analysis import conn
 from src.util import connect_mongo, DATA_ANALYST, ANALYST_PWD
 
 from log import LogHandler
@@ -17,7 +18,7 @@ def get_instrument_symbols(by='amount', threshold=1e9, instrument='future'):
     :param threshold:过滤的阈值
     :return:
     """
-    conn = connect_mongo(db='quote', username=DATA_ANALYST, password=ANALYST_PWD)
+    # conn = connect_mongo(db='quote', username=DATA_ANALYST, password=ANALYST_PWD)
 
     pipeline = [
         {
@@ -65,8 +66,8 @@ def get_instrument_symbols(by='amount', threshold=1e9, instrument='future'):
     if len(symbol_list) == 0:
         log.info('None of snapshot dates return!')
         return symbol_list
-    # return [symbol['_id'] for symbol in symbol_list]
-    return symbol_list
+    return [symbol['_id'] for symbol in symbol_list]
+    # return symbol_list
 
 
 def get_snapshot_start_date(symbol=None, frequency='m', peak_type=None, skip=1):
@@ -80,7 +81,7 @@ def get_snapshot_start_date(symbol=None, frequency='m', peak_type=None, skip=1):
         [{symbol:datetime}]   对应symbol的分析起始时间
     """
     # 连接数据库
-    conn = connect_mongo(db='quote', username=DATA_ANALYST, password=ANALYST_PWD)
+    # conn = connect_mongo(db='quote', username=DATA_ANALYST, password=ANALYST_PWD)
 
     cursor = conn['block']
 
@@ -130,6 +131,8 @@ def get_snapshot_start_date(symbol=None, frequency='m', peak_type=None, skip=1):
         return dates
     return [dict(symbol=date['_id'], start_date=date['start_date'][skip] if len(date['start_date']) > skip else None)
             for date in dates]
+
+
 
 
 if __name__ == '__main__':

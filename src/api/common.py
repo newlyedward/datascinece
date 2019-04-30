@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import pandas as pd
+from pymongo import ASCENDING
 
 from src.util import connect_mongo
 from src.api.cons import FREQ
@@ -87,7 +88,7 @@ def get_price(symbol=None, instrument='index', start_date=None, end_date=None, f
         project_dict.update({x: 1 for x in fields})
         project_dict['symbol'] = 1
 
-    hq = cursor.find(filter_dict, project_dict)
+    hq = cursor.find(filter_dict, project_dict).sort([("datetime", ASCENDING)])
 
     # Expand the cursor and construct the DataFrame
     hq_df = pd.DataFrame(list(hq))
