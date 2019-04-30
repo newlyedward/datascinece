@@ -1,9 +1,10 @@
 import re
+import pandas as pd
 from datetime import datetime, timedelta
 
 from src.api import FREQ
 from src.analysis import conn
-from src.util import connect_mongo, DATA_ANALYST, ANALYST_PWD
+
 
 from log import LogHandler
 
@@ -24,7 +25,7 @@ def get_instrument_symbols(by='amount', threshold=1e9, instrument='future'):
         {
             '$match': {
                 'datetime': {
-                    '$gt': datetime.today() - timedelta(30)    # 选取30天内有交易的品种
+                    '$gt': datetime.today() - timedelta(30)  # 选取30天内有交易的品种
                 }
             }
         }, {
@@ -38,7 +39,7 @@ def get_instrument_symbols(by='amount', threshold=1e9, instrument='future'):
                     '$first': '$datetime'
                 },
                 by: {
-                    '$avg': '$'+by
+                    '$avg': '$' + by
                 }
             }
         }, {
@@ -133,6 +134,61 @@ def get_snapshot_start_date(symbol=None, frequency='m', peak_type=None, skip=1):
             for date in dates]
 
 
+def get_last_price(symbol=None, instrument='index', frequency='d', fields='close'):
+    """
+        获取最新的行情数据
+    :param symbol: 合约代码，symbol, symbol list, 只支持同种类。获取tick数据时，只支持单个symbol
+    :param instrument:   行情数据类型 ['future', 'option', 'stock', 'bond', 'convertible'] 以及 index
+    :param frequency:   历史数据的频率, 默认为'd', 只支持日线级别以上数据。'5m'代表5分钟线。可支持期货tick级别数据获取，此时频率为'tick'
+    :param fields:      字段名称
+    :return:
+        传入一个symbol，多个fields，函数会返回一个pandas DataFrame
+        传入一个symbol，一个field，函数会返回pandas Series
+        传入多个symbol，一个field，函数会返回一个pandas DataFrame
+        传入多个symbol，函数会返回一个multiIndex DataFrame
+    """
+    # 连接数据库
+    # conn = connect_mongo(db='quote', username=DATA_ANALYST, password=ANALYST_PWD)
+
+    cursor = conn[instrument]
+
+    pipeline = [
+        {
+            '$match': {
+                'symbol': {
+                    '$regex': re.compile(r"88$")
+                }
+            }
+        }, {
+            '$sort': {
+                'datetime': -1
+            }
+        }, {
+            '$group': {
+                '_id': '$symbol',
+                'datetime': {
+                    '$first': '$datetime'
+                },
+                'close': {
+                    '$first': '$close'
+                }
+            }
+        }
+    ]
+
+    match_stage = pipeline[0]['$match']
+    if isinstance(symbol, list):
+        match_stage['symbol'] = {'$in': symbol}
+    elif isinstance(symbol, str):
+        match_stage['symbol'] = symbol
+    else:
+        log.debug('Search all instruments snapshot start datetime!')
+
+    last_price = list(cursor.aggregate(pipeline))
+
+    last_price_df = pd.DataFrame(last_price)
+    last_price_df.rename(columns={'_id': 'symbol'})
+    return last_price_df
 
 
 if __name__ == '__main__':
