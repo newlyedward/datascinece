@@ -6,6 +6,8 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
+from pymongo import ASCENDING
+
 from src.data.future.setting import NAME2CODE_MAP, COLUMNS_MAP
 from src.data.future.utils import get_download_file_index, get_insert_mongo_files
 from src.data.setting import RAW_HQ_DIR, INSTRUMENT_TYPE
@@ -218,7 +220,7 @@ def download_hq_by_dates(market, category=0):
 
     target = RAW_HQ_DIR[category] / market
 
-    file_index = get_download_file_index(market, category)
+    file_index = get_download_file_index(market, category, start=datetime(2019, 4, 1))
 
     if file_index.empty:
         return False
@@ -381,7 +383,7 @@ def transfer_shfe_future_hq(date, file_path, columns_map):
     settle_name = columns_map['settle']
     hq_df = hq_df[hq_df[settle_name] != '']
 
-    hq_df = data_type_conversion(hq_df, 0, list(columns_map.values()), list(columns_map.keys()), date, 'czce')
+    hq_df = data_type_conversion(hq_df, 0, list(columns_map.values()), list(columns_map.keys()), date, 'shfe')
     hq_df.loc[:, 'code'] = hq_df['code'].str.strip()
     # 商品字母缩写转换
     hq_df['code'] = hq_df['code'].transform(lambda x: NAME2CODE_MAP['exchange'][x])
@@ -606,14 +608,14 @@ def insert_hq_to_mongo():
                 print("cffex has no option trading.")
                 continue
 
-            if m in ['dce', 'czce'] or c == 0:
+            if m in ['dce', 'czce', 'cffex'] or c == 1:
                 print("debug.")
                 continue
             # 下载更新行情的原始数据
             download_hq_by_dates(m, c)
 
             # 需要导入数据库的原始数据文件
-            file_df = get_insert_mongo_files(m, c)
+            file_df = get_insert_mongo_files(m, c, start=datetime(2000, 4, 1))
 
             if file_df.empty:
                 print('{} {} hq is updated before!'.format(m, t))
@@ -627,6 +629,7 @@ def insert_hq_to_mongo():
                 result = cursor.insert_many(df.to_dict('records'))
                 if result:
                     print('{} {} {} insert success.'.format(m, t, row.filepath.name))
+                    # TODO 文件搬迁
                 else:
                     print('{} {} {} insert failure.'.format(m, t, row.filepath.name))
             print('{} {} hq is updated now!'.format(m, t))
@@ -664,8 +667,8 @@ def build_future_index():
     最接近当月的合约为交割主力合约，在主力合约后交割的为远月主力合约
     :return:
     """
-    # 更新数据库行情数据
-    insert_hq_to_mongo()
+    # 更新数据库行情数据 独立运行，不在此处更新数据
+    # insert_hq_to_mongo()
 
     # 连接数据库
     conn = connect_mongo(db='quote')
@@ -706,13 +709,14 @@ def build_future_index():
             print("Build {} future index from trade beginning.".format(code))
 
         # 从数据库读取所需数据
-        hq = hq_cursor.find(filter_dict, {'_id': 0})
+        hq = hq_cursor.find(filter_dict, {'_id': 0}).sort([("datetime", ASCENDING)])
         hq_df = pd.DataFrame(list(hq))
         if hq_df.empty:
             print('{} index data have been updated before!'.format(code))
             continue
 
         hq_df.set_index(['datetime', 'symbol'], inplace=True)
+        # 需要按照索引排序
 
         date_index = hq_df.index.levels[0]
         if len(date_index) < 2:  # 新的数据
@@ -806,6 +810,6 @@ if __name__ == '__main__':
     # row = Pandas(Index=date, filepath=filepath)
     # df = transfer_exchange_data(row, market='shfe', category=1)
     # result = to_mongo('quote', 'option', df.to_dict('records'))
-    insert_hq_to_mongo()
-    # build_future_index()
+    # insert_hq_to_mongo()
+    build_future_index()
     print(datetime.now())

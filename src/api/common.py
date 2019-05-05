@@ -56,7 +56,7 @@ def get_price(symbol=None, instrument='index', start_date=None, end_date=None, f
         传入一个symbol，多个fields，函数会返回一个pandas DataFrame
         传入一个symbol，一个field，函数会返回pandas Series
         传入多个symbol，一个field，函数会返回一个pandas DataFrame
-        传入多个symbol，函数会返回一个multiIndexe DataFrame
+        传入多个symbol，函数会返回一个multiIndex DataFrame
     """
     # 连接数据库
     conn = connect_mongo(db='quote', username=DATA_ANALYST, password=ANALYST_PWD)
@@ -189,4 +189,4 @@ def get_segments(symbol=None, start_date=None, end_date=None, frequency='d'):
 
 if __name__ == '__main__':
     symbols = ['A88', 'Y88', 'ME88']
-    # start_dates = get_snapshot_start_date(symbol=symbols)
+    # start_dates = get_peak_start_date(symbol=symbols)

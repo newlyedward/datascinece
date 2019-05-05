@@ -1,10 +1,10 @@
 import re
 import pandas as pd
 from datetime import datetime, timedelta
+from pymongo import DESCENDING
 
 from src.api import FREQ
 from src.analysis import conn
-
 
 from log import LogHandler
 
@@ -30,7 +30,7 @@ def get_instrument_symbols(by='amount', threshold=1e9, instrument='future'):
             }
         }, {
             '$sort': {
-                'datetime': -1
+                'datetime': DESCENDING
             }
         }, {
             '$group': {
@@ -50,7 +50,7 @@ def get_instrument_symbols(by='amount', threshold=1e9, instrument='future'):
             }
         }, {
             '$sort': {
-                by: -1
+                by: DESCENDING
             }
         }
     ]
@@ -71,7 +71,7 @@ def get_instrument_symbols(by='amount', threshold=1e9, instrument='future'):
     # return symbol_list
 
 
-def get_snapshot_start_date(symbol=None, frequency='m', peak_type=None, skip=1):
+def get_peak_start_date(symbol=None, frequency='m', peak_type=None, skip=1):
     """
         返回某个趋势极值点的位置，作为分析的起点
     :param symbol: 合约代码，symbol, symbol list
@@ -102,7 +102,7 @@ def get_snapshot_start_date(symbol=None, frequency='m', peak_type=None, skip=1):
             }
         }, {
             '$sort': {
-                'start_date': -1
+                'start_date': DESCENDING
             }
         }, {
             '$group': {
@@ -110,6 +110,12 @@ def get_snapshot_start_date(symbol=None, frequency='m', peak_type=None, skip=1):
                 'start_date': {
                     '$push': '$start_date'
                 }
+            }
+        }, {
+            '$project': {
+                '_id': 0,
+                'symbol': "$_id",
+                'start_date': {'$arrayElemAt': ['$start_date', 1]}
             }
         }
     ]
@@ -125,13 +131,10 @@ def get_snapshot_start_date(symbol=None, frequency='m', peak_type=None, skip=1):
     else:
         log.debug('Search all instruments snapshot start datetime!')
 
-    dates = list(cursor.aggregate(pipeline))
+    dates = cursor.aggregate(pipeline)
 
-    if len(dates) == 0:
-        log.info('None of snapshot dates return!')
-        return dates
-    return [dict(symbol=date['_id'], start_date=date['start_date'][skip] if len(date['start_date']) > skip else None)
-            for date in dates]
+    dates_df = pd.DataFrame(list(dates))
+    return dates_df
 
 
 def get_last_price(symbol=None, instrument='index', frequency='d', fields='close'):
@@ -161,7 +164,7 @@ def get_last_price(symbol=None, instrument='index', frequency='d', fields='close
             }
         }, {
             '$sort': {
-                'datetime': -1
+                'datetime': DESCENDING
             }
         }, {
             '$group': {
@@ -171,7 +174,14 @@ def get_last_price(symbol=None, instrument='index', frequency='d', fields='close
                 },
                 'close': {
                     '$first': '$close'
+                },
+                'amount': {
+                    '$first': '$amount'
                 }
+            }
+        }, {
+            '$sort': {
+                'amount': DESCENDING
             }
         }
     ]
@@ -184,14 +194,67 @@ def get_last_price(symbol=None, instrument='index', frequency='d', fields='close
     else:
         log.debug('Search all instruments snapshot start datetime!')
 
-    last_price = list(cursor.aggregate(pipeline))
+    last_prices = cursor.aggregate(pipeline)
 
-    last_price_df = pd.DataFrame(last_price)
-    last_price_df.rename(columns={'_id': 'symbol'})
-    return last_price_df
+    last_prices_df = pd.DataFrame(list(last_prices))
+    last_prices_df.rename(columns={'_id': 'symbol'}, inplace=True)
+    return last_prices_df
+
+
+def get_snapshot(symbol=None, instrument='index'):
+    if symbol is None:
+        symbol = get_instrument_symbols(by='amount')
+
+    start_df = get_peak_start_date(symbol=symbol)
+
+    start_df['start_date'] = start_df['start_date'].fillna(datetime(1970, 1, 1))
+
+    columns = ['code', 'start_date', 'amount', 'dom_contract', 'close', 'highest',
+               'lowest', 'percentile', 'wave_rt', 'datetime']
+
+    snapshot_df = pd.DataFrame(columns=columns)
+
+    index_cursor = conn[instrument]
+
+    for row in start_df.itertuples():
+        symbol, start_date = row.symbol, row.start_date
+        filter_dict = {
+            'symbol': row.symbol,
+            'datetime': {
+                '$gte': row.start_date
+            }
+        }
+
+        hq = index_cursor.find(filter_dict).sort([('datetime', DESCENDING)])
+
+        hq_df = pd.DataFrame(list(hq))
+
+        last_hq = hq_df.iloc[0]
+
+        close = last_hq['close']
+        highest = hq_df['high'].max()
+        lowest = hq_df['low'].min()
+        wave_rt = (close - lowest) / (highest - lowest)
+
+        # 计算分位数
+        x = hq_df[['open', 'high', 'low', 'close']].unstack().sort_values().reset_index()
+        y = x[x[0] > close]
+        percentile = y.index[0] / len(x)
+
+        hq_related = [last_hq['code'], start_date, last_hq['amount'], last_hq['contract'], close,
+                      highest, lowest, percentile, wave_rt, last_hq['datetime']]
+
+        insert_row = pd.DataFrame([hq_related], columns=columns)
+        snapshot_df = snapshot_df.append(insert_row, ignore_index=True)
+
+    return snapshot_df
 
 
 if __name__ == '__main__':
-    symbols = ['A88', 'Y88', 'ME88']
-    # start_dates = get_snapshot_start_date(symbol=symbols)
-    get_instrument_symbols(by='amount')
+    # symbols = ['A88', 'Y88', 'ME88']
+    # symbols = get_instrument_symbols(by='amount')
+    # start_dates = get_peak_start_date(symbol=symbols)
+    # print(start_dates)
+    # last_price_df = get_last_price(symbol=symbols)
+    get_snapshot()
+    # print(last_price_df)

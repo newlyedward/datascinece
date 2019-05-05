@@ -29,7 +29,7 @@ def get_future_calender(start=None, end=None, country='cn'):
     return df.index
 
 
-def get_download_file_index(market, category, start=datetime(2019, 1, 1)):
+def get_download_file_index(market, category, start=datetime(2019, 4, 1)):
     """
     计算需要下载的文件
     :param start:    从某个交易日开始下载数据
@@ -63,9 +63,10 @@ def get_download_file_index(market, category, start=datetime(2019, 1, 1)):
     return file_index
 
 
-def get_insert_mongo_files(market, category):
+def get_insert_mongo_files(market, category, start=datetime(2000, 1, 1)):
     """
     计算需要插入数据的文件
+    :param start:
     :param market:
     :param category:
     :return:
@@ -78,8 +79,8 @@ def get_insert_mongo_files(market, category):
     conn = connect_mongo(db='quote')
     cursor = conn[INSTRUMENT_TYPE[category]]
 
-    # TODO 是否需要维护一个装门的数据list
-    date_index = cursor.distinct('datetime', {'market': market})
+    # TODO 是否需要维护一个专门的数据list
+    date_index = cursor.distinct('datetime', {'market': market, 'datetime': {'&gte': start}})
 
     file_df = get_exist_files(market, category)
 

@@ -198,7 +198,7 @@ def identify_blocks_relation(block_df: pd.DataFrame):
         temp_df.iloc[index, type_index] = block_type
         temp_df.iloc[index, relation_index] = block_relation
 
-        if prev_segment_num > 3:
+        if prev_segment_num > 3:          # segment_num = 3 的不认为是一个震荡区间
             block_index = block_index + 1
 
         # 最后一个block不能确认是top或者bottom,segment_num < 4的情况要计算在内
@@ -692,7 +692,7 @@ def build_one_instrument_blocks(symbol, frequency):
 
     if result.acknowledged:
         log.debug('{} block:{} data update success.'.format(symbol, FREQ[frequency]))
-        return True  # 形成新的segment，需要后续进行处理block
+        return True
     else:
         log.warning('{} block:{} data update failure.'.format(symbol, FREQ[frequency]))
         return False
