@@ -7,6 +7,7 @@ from src.api import FREQ
 from src.analysis import conn
 
 from log import LogHandler
+from src.data.future.setting import CODE2NAME_MAP
 
 log = LogHandler('analysis.log')
 
@@ -209,7 +210,7 @@ def get_snapshot(symbol=None, instrument='index'):
 
     start_df['start_date'] = start_df['start_date'].fillna(datetime(1970, 1, 1))
 
-    columns = ['code', 'start_date', 'amount', 'dom_contract', 'close', 'highest',
+    columns = ['code', 'name', 'start_date', 'amount', 'dom_contract', 'close', 'highest',
                'lowest', 'percentile', 'wave_rt', 'datetime']
 
     snapshot_df = pd.DataFrame(columns=columns)
@@ -231,6 +232,7 @@ def get_snapshot(symbol=None, instrument='index'):
 
         last_hq = hq_df.iloc[0]
 
+        code = last_hq['code']
         close = last_hq['close']
         highest = hq_df['high'].max()
         lowest = hq_df['low'].min()
@@ -241,13 +243,13 @@ def get_snapshot(symbol=None, instrument='index'):
         y = x[x[0] > close]
         percentile = y.index[0] / len(x)
 
-        hq_related = [last_hq['code'], start_date, last_hq['amount'], last_hq['contract'], close,
+        hq_related = [code, CODE2NAME_MAP.get(code, code), start_date, last_hq['amount'], last_hq['contract'], close,
                       highest, lowest, percentile, wave_rt, last_hq['datetime']]
 
         insert_row = pd.DataFrame([hq_related], columns=columns)
         snapshot_df = snapshot_df.append(insert_row, ignore_index=True)
 
-    return snapshot_df
+    return snapshot_df.sort_values(by='percentile')
 
 
 if __name__ == '__main__':
