@@ -202,16 +202,17 @@ def get_last_price(symbol=None, instrument='index', frequency='d', fields='close
     return last_prices_df
 
 
-def get_snapshot(symbol=None, instrument='index'):
+def get_snapshot(symbol=None, instrument='index', threshold=1e9):
     if symbol is None:
-        symbol = get_instrument_symbols(by='amount')
+        symbol = get_instrument_symbols(by='amount', threshold=threshold)
 
     start_df = get_peak_start_date(symbol=symbol)
 
     start_df['start_date'] = start_df['start_date'].fillna(datetime(1970, 1, 1))
 
-    columns = ['code', 'name', 'start_date', 'amount', 'dom_contract', 'close', 'highest',
-               'lowest', 'percentile', 'wave_rt', 'datetime']
+    columns = ['name', 'percentile', 'wave_rt',
+               'amount', 'close', 'highest', 'lowest',
+               'contract', 'start_date', 'datetime']
 
     snapshot_df = pd.DataFrame(columns=columns)
 
@@ -220,9 +221,9 @@ def get_snapshot(symbol=None, instrument='index'):
     for row in start_df.itertuples():
         symbol, start_date = row.symbol, row.start_date
         filter_dict = {
-            'symbol': row.symbol,
+            'symbol': symbol,
             'datetime': {
-                '$gte': row.start_date
+                '$gte': start_date
             }
         }
 
@@ -230,26 +231,60 @@ def get_snapshot(symbol=None, instrument='index'):
 
         hq_df = pd.DataFrame(list(hq))
 
+        hq_df = hq_df[hq_df['low'] > 0]  # 历史成交量可能为0，没有成交价格
+
         last_hq = hq_df.iloc[0]
 
         code = last_hq['code']
         close = last_hq['close']
         highest = hq_df['high'].max()
         lowest = hq_df['low'].min()
-        wave_rt = (close - lowest) / (highest - lowest)
+        snapshot_df.loc[code, 'wave_rt'] = (close - lowest) / (highest - lowest)
 
         # 计算分位数
         x = hq_df[['open', 'high', 'low', 'close']].unstack().sort_values().reset_index()
         y = x[x[0] > close]
-        percentile = y.index[0] / len(x)
+        snapshot_df.loc[code, 'percentile'] = y.index[0] / len(x)
 
-        hq_related = [code, CODE2NAME_MAP.get(code, code), start_date, last_hq['amount'], last_hq['contract'], close,
-                      highest, lowest, percentile, wave_rt, last_hq['datetime']]
+        # columns = ['code', 'name', 'percentile', 'wave_rt',
+        #            'amount', 'close', 'highest', 'lowest',
+        #            'dom_contract', 'start_date', 'datetime']
+        snapshot_df.loc[code, 'name'] = CODE2NAME_MAP.get(code, code)
+        snapshot_df.loc[code, 'amount'] = last_hq['amount'] / 1e8
+        snapshot_df.loc[code, 'close'] = close
+        snapshot_df.loc[code, 'highest'] = highest
+        snapshot_df.loc[code, 'lowest'] = lowest
+        snapshot_df.loc[code, 'contract'] = last_hq['contract']
+        snapshot_df.loc[code, 'start_date'] = start_date
+        snapshot_df.loc[code, 'datetime'] = last_hq['datetime']
 
-        insert_row = pd.DataFrame([hq_related], columns=columns)
-        snapshot_df = snapshot_df.append(insert_row, ignore_index=True)
+    snapshot_df.sort_values(by='percentile', inplace=True)
 
-    return snapshot_df.sort_values(by='percentile')
+    freq = [7, 6, 5]
+    periods = ['month', 'week', 'day']
+    block = ['enter_date', 'type', 'relation', 'sn', 'segment_num']
+    columns = pd.MultiIndex.from_product([periods, block], names=['period', 'block'])
+
+    block_status_df = pd.DataFrame(index=snapshot_df.index, columns=columns)
+
+    block_cursor = conn['block']
+
+    projection = {'_id': 0, 'enter_date': 1, 'type': 1, 'relation': 1, 'sn': 1, 'segment_num': 1}
+
+    for code in block_status_df.index:
+        symbol = code + '88'
+        filter_dict = {'symbol': symbol}
+
+        for period, frequency in zip(periods, freq):
+            filter_dict['frequency'] = {'$gte': frequency}
+            block_status = block_cursor.find_one(filter_dict, projection=projection, sort=[('enter_date', DESCENDING)])
+            block_status_df.loc[code, (period, 'enter_date')] = block_status['enter_date']
+            block_status_df.loc[code, (period, 'type')] = block_status['type']
+            block_status_df.loc[code, (period, 'relation')] = block_status['relation']
+            block_status_df.loc[code, (period, 'sn')] = block_status['sn']
+            block_status_df.loc[code, (period, 'segment_num')] = block_status['segment_num']
+
+    return snapshot_df, block_status_df
 
 
 if __name__ == '__main__':
