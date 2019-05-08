@@ -276,7 +276,7 @@ def get_snapshot(symbol=None, instrument='index', threshold=1e9):
         filter_dict = {'symbol': symbol}
 
         for period, frequency in zip(periods, freq):
-            filter_dict['frequency'] = {'$gte': frequency}
+            filter_dict['frequency'] = frequency
             block_status = block_cursor.find_one(filter_dict, projection=projection, sort=[('enter_date', DESCENDING)])
             block_status_df.loc[code, (period, 'enter_date')] = block_status['enter_date']
             block_status_df.loc[code, (period, 'type')] = block_status['type']

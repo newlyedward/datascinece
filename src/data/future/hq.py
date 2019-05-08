@@ -1,15 +1,17 @@
 # -*- coding: utf-8 -*-
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
 
-from pymongo import ASCENDING
+from pymongo import ASCENDING, DESCENDING
 
+from src.data import conn
+from src.data.setting import TRADE_BEGIN_DATE
 from src.data.future.setting import NAME2CODE_MAP, COLUMNS_MAP
-from src.data.future.utils import get_download_file_index, get_insert_mongo_files
+from src.data.future.utils import get_download_file_index, get_insert_mongo_files, move_data_files
 from src.data.setting import RAW_HQ_DIR, INSTRUMENT_TYPE
 from src.util import get_post_text, get_html_text, connect_mongo
 from log import LogHandler
@@ -207,9 +209,10 @@ def download_hq_by_date(date, file_path, market='dce', category=0):
     return True
 
 
-def download_hq_by_dates(market, category=0):
+def download_hq_by_dates(market, start, category=0):
     """
     根据日期连续下载交易所日交易数据
+    :param start:
     :param market:
     :param category: 行情类型, 0期货 或 1期权
     :return True False: 说明不用下载数据
@@ -220,7 +223,7 @@ def download_hq_by_dates(market, category=0):
 
     target = RAW_HQ_DIR[category] / market
 
-    file_index = get_download_file_index(market, category, start=datetime(2019, 4, 1))
+    file_index = get_download_file_index(market, category, start=start)
 
     if file_index.empty:
         return False
@@ -428,12 +431,13 @@ def transfer_cffex_future_hq(date, file_path, columns_map):
 
     # 商品字母缩写转换
     symbol_name = columns_map['symbol']
+    hq_df[symbol_name] = hq_df[symbol_name].str.strip()  # cffex 下载数据中有空格
     split_re, index = split_symbol('^[a-zA-Z]{1,2}', hq_df[symbol_name])
     hq_df = hq_df if all(index) else hq_df[index]
-    hq_df['code'] = split_re.transform(lambda x: x[0])
 
     hq_df = data_type_conversion(hq_df, 0, list(columns_map.values()), list(columns_map.keys()), date, 'cffex')
 
+    hq_df['code'] = split_re.transform(lambda x: x[0])
     hq_df['amount'] = pd.to_numeric(hq_df['amount'], downcast='float') * 10000
 
     return hq_df
@@ -584,7 +588,7 @@ def insert_hq_to_mongo():
     category = [0, 1]
     market = ['dce', 'czce', 'shfe', 'cffex']
 
-    conn = connect_mongo(db='quote')
+    # conn = connect_mongo(db='quote')
 
     transfer_exchange_hq_func = [
         {
@@ -608,14 +612,22 @@ def insert_hq_to_mongo():
                 print("cffex has no option trading.")
                 continue
 
-            if m in ['dce', 'czce', 'cffex'] or c == 1:
-                print("debug.")
-                continue
+            # if m in ['dce', 'czce', 'shfe'] or c == 1:
+            #     print("debug.")
+            #     continue
             # 下载更新行情的原始数据
-            download_hq_by_dates(m, c)
+            filer_dict = {"market": m}
+            projection = {"_id": 0, "datetime": 1}
+
+            start = cursor.find_one(filer_dict, projection=projection, sort=[("datetime", DESCENDING)])
+            if start is None:
+                start = TRADE_BEGIN_DATE[m][c]
+            else:
+                start = start['datetime']
+            download_hq_by_dates(m, start, c)
 
             # 需要导入数据库的原始数据文件
-            file_df = get_insert_mongo_files(m, c, start=datetime(2000, 4, 1))
+            file_df = get_insert_mongo_files(m, c, start=start)
 
             if file_df.empty:
                 print('{} {} hq is updated before!'.format(m, t))
@@ -629,7 +641,7 @@ def insert_hq_to_mongo():
                 result = cursor.insert_many(df.to_dict('records'))
                 if result:
                     print('{} {} {} insert success.'.format(m, t, row.filepath.name))
-                    # TODO 文件搬迁
+                    move_data_files(row.filepath)
                 else:
                     print('{} {} {} insert failure.'.format(m, t, row.filepath.name))
             print('{} {} hq is updated now!'.format(m, t))
@@ -671,12 +683,13 @@ def build_future_index():
     # insert_hq_to_mongo()
 
     # 连接数据库
-    conn = connect_mongo(db='quote')
+    # conn = connect_mongo(db='quote')
 
     index_cursor = conn['index']
     hq_cursor = conn['future']
 
-    # 从 future collection中提取交易的品种
+    # 从 future collection中提取60天内交易的品种
+    filter_dict = {'datetime': {"$gt": datetime.today() - timedelta(60)}}
     codes = hq_cursor.distinct('code')
     if not isinstance(codes, list) or len(codes) == 0:
         print("Don't find any trading code in future collection!")
@@ -685,7 +698,7 @@ def build_future_index():
     # 按品种分别编制指数
     for code in codes:
         # 获取指数数据最近的一条主力合约记录，判断依据是前一天的持仓量
-        last_doc = index_cursor.find_one({'symbol': code + '88'}, sort=[('datetime', -1)])
+        last_doc = index_cursor.find_one({'symbol': code + '88'}, sort=[('datetime', DESCENDING)])
 
         if last_doc:
             filter_dict = {'code': code, 'datetime': {'$gte': last_doc['datetime']}}
@@ -698,11 +711,11 @@ def build_future_index():
             # 早籼稻  ER/10吨   RI/20吨      2013-5-23
             # 绿豆    GN                    2010-3-23
             # 菜籽油   RO/5吨   OI/10吨      2013-5-15
-            if code in ['GN', 'WS', 'WT', 'RO', 'ER', 'ME', 'TC']:
-                print('{} is the {} last trading day.'.format(last_doc['datetime'].strftime('%Y-%m-%d'), code))
-                continue
-            else:
-                print("Build {} future index from {}".format(code, last_doc['datetime']))
+            # if code in ['GN', 'WS', 'WT', 'RO', 'ER', 'ME', 'TC']:
+            #     print('{} is the {} last trading day.'.format(last_doc['datetime'].strftime('%Y-%m-%d'), code))
+            #     continue
+            # else:
+            #     print("Build {} future index from {}".format(code, last_doc['datetime']))
         else:  # 测试指定日期
             # filter_dict = {'code': code, 'datetime': {'$lte': datetime(2003, 1, 1)}}
             filter_dict = {'code': code}
@@ -810,6 +823,7 @@ if __name__ == '__main__':
     # row = Pandas(Index=date, filepath=filepath)
     # df = transfer_exchange_data(row, market='shfe', category=1)
     # result = to_mongo('quote', 'option', df.to_dict('records'))
-    # insert_hq_to_mongo()
+    # TODO 交易日历+自动下载
+    insert_hq_to_mongo()
     build_future_index()
     print(datetime.now())

@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 import re
+from pathlib import Path
 from datetime import datetime, timedelta
 
 import pandas as pd
 
-from src.data.setting import DATE_PATTERN, INSTRUMENT_TYPE, RAW_HQ_DIR
-from src.data.tdx import get_future_hq
-from src.util import connect_mongo
+from src.data import conn
+from src.data import DATE_PATTERN, INSTRUMENT_TYPE, RAW_HQ_DIR, BACKUP_DIR
+from src.data import get_future_hq
 from log import LogHandler
 
 log = LogHandler('future.log')
@@ -40,7 +41,7 @@ def get_download_file_index(market, category, start=datetime(2019, 4, 1)):
     # start = TRADE_BEGIN_DATE[market][category]
     # start = datetime(2019, 1, 1)   # 数据已经确定下载不再需要比对
     ret = pd.to_datetime([])
-
+    start += timedelta(1)
     try:
         # 当天 5点后才下载当天数据
         today = datetime.today()
@@ -76,13 +77,14 @@ def get_insert_mongo_files(market, category, start=datetime(2000, 1, 1)):
     """
     assert market in ['dce', 'czce', 'shfe', 'cffex']
 
-    conn = connect_mongo(db='quote')
+    # conn = connect_mongo(db='quote')
     cursor = conn[INSTRUMENT_TYPE[category]]
+    start += timedelta(1)
 
-    # TODO 是否需要维护一个专门的数据list
     date_index = cursor.distinct('datetime', {'market': market, 'datetime': {'&gte': start}})
 
     file_df = get_exist_files(market, category)
+    file_df = file_df[start:]
 
     if len(date_index) == 0:
         return file_df
@@ -120,6 +122,24 @@ def get_exist_files(market, category):
             file_df = ret
 
     return file_df
+
+
+def move_data_files(src, dst=BACKUP_DIR):
+    if isinstance(src, str):
+        src = Path(str)
+
+    parts = src.parts
+    dst = Path(dst + '\\'.join(parts[parts.index('data'):]))
+
+    if dst.exists():
+        return True
+
+    parent = dst.parent
+
+    if not parent.exists():
+        parent.mkdir(parents=True)
+
+    src.rename(dst)
 
 
 if __name__ == '__main__':
