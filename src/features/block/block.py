@@ -5,9 +5,10 @@ block
 This module contains the identification of peaks, segments and blocks.
 """
 from bson.objectid import ObjectId
+from pymongo import ASCENDING, DESCENDING
 
 from log import LogHandler
-# from datetime import datetime, timedelta
+from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
 import scipy.signal as signal
@@ -16,7 +17,7 @@ import scipy.signal as signal
 # get_history_hq_api(code, start=None, end=None, freq='d')
 from src.data.tdx import get_future_hq
 from src.util import connect_mongo
-from src.setting import DATA_ANALYST, ANALYST_PWD
+# from src.setting import DATA_ANALYST, ANALYST_PWD
 from src.api.cons import FREQ
 
 get_history_hq_api = get_future_hq
@@ -232,6 +233,7 @@ def identify_blocks(segment_df: pd.DataFrame):
             segment_num:
     """
     # 按high，low间隔排列，防止同一天的极值点排列错误
+    assert len(segment_df) > 2
     segment_df = sort_one_candle_peaks(segment_df, invert=False)
 
     # init current block 第一个segment假设为enter segment
@@ -260,6 +262,8 @@ def identify_blocks(segment_df: pd.DataFrame):
                 start_date = segment_df.datetime.iloc[index - 1]
                 segment_num = 1
                 block_high = block_highest = current_high = current_highest = row.peak
+                if segment_df.type.iloc[index - 1] == 'low':
+                    pass   # TODO 测试代码
                 assert segment_df.type.iloc[index - 1] == 'low'
                 block_low = block_lowest = current_low = current_lowest = segment_df.peak.iloc[index - 1]
             else:
@@ -306,13 +310,14 @@ def sort_one_candle_peaks(peak_df, invert=True):
     """
     # 检测输入类型
     assert isinstance(peak_df, pd.DataFrame)
+    assert peak_df.index.name is None
 
     df = peak_df.copy()  # 不对输入数据进行操作，有可能改变原始数据
     df['sn'] = range(len(df))
 
-    index_name = peak_df.index.name
-    if index_name is None:
-        peak_df.set_index('datetime')
+    # index_name = peak_df.index.name
+    # if index_name is None:
+    #     df.set_index('datetime')
 
     # 不存在同一个k线上有极值点的处理
     for row in df[df.index.duplicated()].itertuples():
@@ -324,8 +329,8 @@ def sort_one_candle_peaks(peak_df, invert=True):
 
     del df['sn']
 
-    if index_name is None:
-        df.reset_index(inplace=True)
+    # if index_name is None:
+    #     df.reset_index(inplace=True)
     return df
 
 
@@ -390,14 +395,15 @@ def get_peaks_from_segments(segment_df):
     """
     only calculate the peaks of kline value of high and low
     :param segment_df: pd.DataFame, 按照datetime升序排列， 索引从0-N
-            columns=['datetime', 'high', 'low']
+            columns=['datetime', 'peak', 'type']
     :return: pd.DataFame, columns=['datetime', 'peak', 'type']
         peak        high,low的极值点
         type        'high' or 'low'
     """
 
     df = segment_df.copy()
-
+    # df.sort_values('datetime', inplace=True)
+    # df.reset_index(drop=True, inplace=True)
     high_df = df[df['type'] == 'high']
     low_df = df[df['type'] == 'low']
 
@@ -421,7 +427,8 @@ def get_peaks_from_segments(segment_df):
     b4 = np.logical_and(np.logical_and(f_compare < 0, y.type == 'high'), segment_df.type == 'high')
     bflag = np.logical_or(np.logical_or(b1, b2), np.logical_or(b3, b4))
 
-    return peak_df.append(segment_df[bflag.values]).sort_index()
+    peak_df = peak_df.append(segment_df[bflag.values]).sort_index()
+    return peak_df.reset_index(drop=True)
 
 
 def get_peaks_from_hq(hq_df):
@@ -433,12 +440,15 @@ def get_peaks_from_hq(hq_df):
         peak        high,low的极值点
         type        'high' or 'low'
     """
-    high_df = hq_df.rename(columns={'high': 'peak'})
+    df = hq_df.copy()
+    # df.sort_values('datetime', inplace=True)
+    # df.reset_index(drop=True, inplace=True)
+    high_df = df.rename(columns={'high': 'peak'})
     del high_df['low']
     high_df['type'] = 'high'
 
     # low_df = lower.low.to_frame('peak')
-    low_df = hq_df.rename(columns={'low': 'peak'})
+    low_df = df.rename(columns={'low': 'peak'})
     del low_df['high']
     low_df['type'] = 'low'
 
@@ -450,7 +460,7 @@ def get_peaks_from_hq(hq_df):
 
     # peak_df.to_excel('peak_ww.xlsx')
 
-    return peak_df
+    return peak_df.reset_index(drop=True)
 
 
 def get_history_hq(code, start_date=None, end_date=None, freq='d'):
@@ -487,14 +497,15 @@ def build_one_instrument_segments(symbol, frequency, instrument='index'):
     #              同时判断高级别段是否形成
     # segment 中datetime不唯一
     last_2_docs = segment_cursor.find({'symbol': symbol, 'frequency': {'$gte': frequency}},
-                                      sort=[('datetime', -1)], limit=2)
+                                      sort=[('datetime', DESCENDING)], limit=2)
 
     last_2_docs_df = pd.DataFrame(list(last_2_docs))
     filter_dict = {'symbol': symbol}
     #  只有一个记录或者没有记录要从头开始取数据
-    if last_2_docs_df.empty or len(last_2_docs_df) == 1:
+    last_docs_len = len(last_2_docs_df)
+    if last_2_docs_df.empty or last_docs_len == 1:
         # filter_dict['datetime'] = {'$lte': datetime(2012, 9, 20)}
-        log.info("Build {} future segment from trade beginning.".format(symbol))
+        log.debug("Build {} future segment from trade beginning.".format(symbol))
     else:
         update = last_2_docs_df['datetime'].iloc[-1]
         # filter_dict['datetime'] = {'$gte': update, '$lte': datetime(2012, 9, 7)}
@@ -502,8 +513,9 @@ def build_one_instrument_segments(symbol, frequency, instrument='index'):
         log.info("Build {} future segment from {}".format(symbol, update))
 
     # 从数据库读取所需数据
+    projection = {'_id': 0, 'datetime': 1, 'high': 1, 'low': 1}
     if frequency == 5:  # 日线数据从行情数据库取数据
-        hq = inst_cursor.find(filter_dict, {'_id': 0, 'datetime': 1, 'high': 1, 'low': 1})
+        hq = inst_cursor.find(filter_dict, projection=projection).sort([("datetime", ASCENDING)])
         hq_df = pd.DataFrame(list(hq))
         if hq_df.empty:
             log.warning('{} hq data:{} is empty!'.format(symbol, FREQ[frequency]))
@@ -514,10 +526,12 @@ def build_one_instrument_segments(symbol, frequency, instrument='index'):
             log.warning('{} hq data:{} is empty!'.format(symbol, FREQ[frequency]))
             return False
 
+        # hq_df 需要按 datetime 升序排列, 返回的序列索引0-N
         peak_df = get_peaks_from_hq(hq_df)
+
     elif frequency > 5:
         filter_dict['frequency'] = {'$gte': frequency - 1}
-        segment = segment_cursor.find(filter_dict)
+        segment = segment_cursor.find(filter_dict).sort([("datetime", ASCENDING)])
         segment_df = pd.DataFrame(list(segment))
         if segment_df.empty:
             log.warning('{} segment data:{} is empty!'.format(symbol, FREQ[frequency]))
@@ -531,6 +545,15 @@ def build_one_instrument_segments(symbol, frequency, instrument='index'):
     if peak_df.empty:
         log.warning('{} peak:{} data is empty.'.format(symbol, FREQ[frequency]))
         return False
+
+    # 如果不是第一根k线，不能存在同一根k线有高点的情况
+    if last_2_docs_df.empty or last_docs_len == 1 or peak_df.datetime[1] != peak_df.datetime[0]:
+        log.debug('Do not judge first two peak recorders')
+    else:
+        if peak_df.type[0] == last_2_docs_df.type.iloc[-1]:
+            peak_df.drop(1, inplace=True)
+        else:
+            peak_df.drop(0, inplace=True)
 
     segment_df = get_segments_from_peaks(peak_df)
     if segment_df.empty:
@@ -559,7 +582,6 @@ def build_one_instrument_segments(symbol, frequency, instrument='index'):
             log.warning('{} segment:{} data update failure.'.format(symbol, FREQ[frequency]))
             return False
 
-    last_docs_len = len(last_2_docs_df)
     index = ['datetime', 'type']
     df1 = segment_df.set_index(index).sort_index()
     df2 = last_2_docs_df.set_index(index).sort_index()
@@ -574,6 +596,8 @@ def build_one_instrument_segments(symbol, frequency, instrument='index'):
 
     # 需要更新数据库原有数据
     if len(update_index) != 0:
+        if len(update_index) != 1:
+            print("error")
         assert len(update_index) == 1
         record_id = df2.loc[update_index, '_id']
         record_id = ObjectId(record_id.values[0])
@@ -643,8 +667,8 @@ def build_one_instrument_blocks(symbol, frequency):
 
     segments = segment_cursor.find(filter_dict, sort=[('datetime', 1)])
     segment_df = pd.DataFrame(list(segments))
-    if segment_df.empty:
-        log.warning('{} segment data:{} is empty!'.format(symbol, FREQ[frequency]))
+    if segment_df.empty or len(segment_df) < 3:
+        log.debug('{} segment data:{} is not enough!'.format(symbol, FREQ[frequency]))
         return False
 
     block_df = identify_blocks(segment_df)
@@ -708,7 +732,7 @@ def build_segments():
     # segment_cursor = conn['segment']
     index_cursor = conn['index']
 
-    filter_dict = {'symbol': {'$regex': '(8|0){2}$'}}
+    filter_dict = {'symbol': {'$regex': '(8|0){2}$'}, 'datetime': {"$gt": datetime.today() - timedelta(360)}}
     symbols = index_cursor.distinct('symbol', filter_dict)
 
     if not isinstance(symbols, list) or len(symbols) == 0:
@@ -729,14 +753,15 @@ def build_segments():
 
 
 if __name__ == "__main__":
-    from datetime import datetime
+    from datetime import datetime, timedelta
 
     # from src.features.block import TsBlock
 
     start = datetime(2018, 6, 29)
     end = datetime(2019, 3, 1)
 
-    build_segments()
+    # build_segments()
+    build_one_instrument_segments('V00', 5)
     # build_one_instrument_blocks('A88', 5)
     # observation = 250
     # start = today - timedelta(observation)

@@ -1,4 +1,5 @@
 import re
+import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
 from pymongo import DESCENDING
@@ -8,6 +9,7 @@ from src.analysis import conn
 
 from log import LogHandler
 from src.data.future.setting import CODE2NAME_MAP
+from src.util import count_percentile
 
 log = LogHandler('analysis.log')
 
@@ -210,6 +212,7 @@ def get_snapshot(symbol=None, instrument='index', threshold=1e9):
 
     start_df['start_date'] = start_df['start_date'].fillna(datetime(1970, 1, 1))
 
+    # price status
     columns = ['name', 'percentile', 'wave_rt',
                'amount', 'close', 'highest', 'lowest',
                'contract', 'start_date', 'datetime']
@@ -241,7 +244,7 @@ def get_snapshot(symbol=None, instrument='index', threshold=1e9):
         lowest = hq_df['low'].min()
         snapshot_df.loc[code, 'wave_rt'] = (close - lowest) / (highest - lowest)
 
-        # 计算分位数
+        # 计算分位数 TODO 使用函数计算
         x = hq_df[['open', 'high', 'low', 'close']].unstack().sort_values().reset_index()
         y = x[x[0] > close]
         snapshot_df.loc[code, 'percentile'] = y.index[0] / len(x)
@@ -260,6 +263,71 @@ def get_snapshot(symbol=None, instrument='index', threshold=1e9):
 
     snapshot_df.sort_values(by='percentile', inplace=True)
 
+    # roll yield status
+    columns = ['deliver_yield', 'nearby_yield', 'far_month_yield',
+               'deliver_yield_pct', 'nearby_yield_pct', 'far_month_yield_pct']
+    roll_yield_df = pd.DataFrame(index=snapshot_df.index, columns=columns)
+
+    for code in roll_yield_df.index:
+        start_date = snapshot_df.loc[code, 'start_date']
+
+        filter_dict = {
+            'symbol': {"$regex": "^"+code+"[7-9]{2}$"},
+            'datetime': {
+                '$gte': start_date
+            }
+        }
+
+        projection = {
+            "_id": 0,
+            "symbol": 1,
+            "datetime": 1,
+            "close": 1
+        }
+
+        hq = index_cursor.find(filter_dict, projection=projection)
+
+        hq_df = pd.DataFrame(list(hq))
+        hq_df = hq_df.pivot(index='datetime', columns='symbol', values='close')
+
+        spot_cursor = conn['spot_price']
+        filter_dict = {"code": code}
+        projection = {"_id": 0, "datetime": 1, "spot": 1}
+        spot = spot_cursor.find(filter_dict, projection=projection)
+        spot_df = pd.DataFrame(list(spot))
+        if spot_df.empty:
+            yield_df = hq_df
+            yield_df.columns = ['deliver', 'domain', 'far_month']
+            yield_df['deliver_yield'] = np.nan
+        else:
+            spot_df.set_index('datetime', inplace=True)
+            yield_df = pd.concat([spot_df, hq_df], axis=1)
+            yield_df.columns = ['spot', 'deliver', 'domain', 'far_month']
+            yield_df['deliver_yield'] = (yield_df['deliver'] / yield_df['spot'] - 1) * 100
+
+        yield_df['nearby_yield'] = (yield_df['domain'] / yield_df['deliver'] - 1) * 100
+        yield_df['far_month_yield'] = (yield_df['far_month'] / yield_df['domain'] - 1) * 100
+
+        last_yield = yield_df.iloc[-1]
+
+        roll_yield_df.loc[code, 'deliver_yield'] = last_yield['deliver_yield']
+        roll_yield_df.loc[code, 'nearby_yield'] = last_yield['nearby_yield']
+        roll_yield_df.loc[code, 'far_month_yield'] = last_yield['far_month_yield']
+
+        if spot_df.empty:
+            roll_yield_df.loc[code, 'deliver_yield_pct'] = np.nan
+        else:
+            roll_yield_df.loc[code, 'deliver_yield_pct'] = \
+                count_percentile(last_yield['deliver_yield'], yield_df['deliver_yield'])
+
+        roll_yield_df.loc[code, 'nearby_yield_pct'] = \
+            count_percentile(last_yield['nearby_yield'],
+                             yield_df.loc[yield_df['nearby_yield'] != 0, 'nearby_yield'])
+        roll_yield_df.loc[code, 'far_month_yield_pct'] = \
+            count_percentile(last_yield['far_month_yield'],
+                             yield_df.loc[yield_df['far_month_yield'] != 0, 'far_month_yield'])
+
+    # block status
     freq = [7, 6, 5]
     periods = ['month', 'week', 'day']
     block = ['enter_date', 'type', 'relation', 'sn', 'segment_num']
@@ -284,7 +352,7 @@ def get_snapshot(symbol=None, instrument='index', threshold=1e9):
             block_status_df.loc[code, (period, 'sn')] = block_status['sn']
             block_status_df.loc[code, (period, 'segment_num')] = block_status['segment_num']
 
-    return snapshot_df, block_status_df
+    return snapshot_df, block_status_df, roll_yield_df
 
 
 if __name__ == '__main__':
@@ -293,5 +361,9 @@ if __name__ == '__main__':
     # start_dates = get_peak_start_date(symbol=symbols)
     # print(start_dates)
     # last_price_df = get_last_price(symbol=symbols)
-    get_snapshot()
+    snapshot_df, block_status_df, roll_yield_df = get_snapshot(threshold=1e11)
+    with pd.ExcelWriter('output.xlsx') as writer:
+        snapshot_df.to_excel(writer, sheet_name='snapshot')
+        block_status_df.to_excel(writer, sheet_name='block_status')
+        roll_yield_df.to_excel(writer, sheet_name='roll_yield')
     # print(last_price_df)

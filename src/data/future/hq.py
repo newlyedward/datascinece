@@ -11,7 +11,7 @@ from pymongo import ASCENDING, DESCENDING
 from src.data import conn
 from src.data.setting import TRADE_BEGIN_DATE
 from src.data.future.setting import NAME2CODE_MAP, COLUMNS_MAP
-from src.data.future.utils import get_download_file_index, get_insert_mongo_files, move_data_files
+from src.data.future.utils import get_download_file_index, get_insert_mongo_files, move_data_files, get_exist_files
 from src.data.setting import RAW_HQ_DIR, INSTRUMENT_TYPE
 from src.util import get_post_text, get_html_text, connect_mongo
 from log import LogHandler
@@ -223,7 +223,7 @@ def download_hq_by_dates(market, start, category=0):
 
     target = RAW_HQ_DIR[category] / market
 
-    file_index = get_download_file_index(market, category, start=start)
+    file_index = get_download_file_index(target, start=start)
 
     if file_index.empty:
         return False
@@ -623,11 +623,13 @@ def insert_hq_to_mongo():
             if start is None:
                 start = TRADE_BEGIN_DATE[m][c]
             else:
-                start = start['datetime']
+                start = start['datetime'] + timedelta(1)
             download_hq_by_dates(m, start, c)
 
             # 需要导入数据库的原始数据文件
-            file_df = get_insert_mongo_files(m, c, start=start)
+            # file_df = get_insert_mongo_files(m, c, start=start)
+            file_df = get_exist_files(RAW_HQ_DIR[c] / m)
+            file_df = file_df[start:]
 
             if file_df.empty:
                 print('{} {} hq is updated before!'.format(m, t))
@@ -689,8 +691,8 @@ def build_future_index():
     hq_cursor = conn['future']
 
     # 从 future collection中提取60天内交易的品种
-    filter_dict = {'datetime': {"$gt": datetime.today() - timedelta(60)}}
-    codes = hq_cursor.distinct('code')
+    filter_dict = {'datetime': {"$gt": datetime.today() - timedelta(360)}}
+    codes = hq_cursor.distinct('code', filter_dict)
     if not isinstance(codes, list) or len(codes) == 0:
         print("Don't find any trading code in future collection!")
         return

@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from log import LogHandler
 from src.data.setting import PROCESSED_DATA_DIR, DATE_PATTERN
 from src.data.future.setting import SPREAD_DIR, NAME2CODE_MAP
-from src.data.future.spread import get_future_spreads
+from src.data.future.spread import download_spot_by_dates
 from src.util import convert_percent
 
 log = LogHandler('future.log')
@@ -41,7 +41,7 @@ def construct_spreads(end=None):
             return
 
     # 保证每次将数据更新需要的程度, 数据虽然不需要更新，但是hdf文件不需要更新，不用判断
-    get_future_spreads(start=update, end=end)
+    download_spot_by_dates(start=update, end=end)
 
     # concat raw data from specific date
     file_df = pd.DataFrame([(pd.to_datetime([re.search(DATE_PATTERN, x.name)[0]]), x)

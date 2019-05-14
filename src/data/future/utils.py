@@ -30,18 +30,14 @@ def get_future_calender(start=None, end=None, country='cn'):
     return df.index
 
 
-def get_download_file_index(market, category, start=datetime(2019, 4, 1)):
+def get_download_file_index(target, start=datetime(2019, 4, 1)):
     """
     计算需要下载的文件
+    :param target:
     :param start:    从某个交易日开始下载数据
-    :param market:
-    :param category:
     :return: pandas.core.indexes.datetimes.DatetimeIndex 日期的索引值
     """
-    # start = TRADE_BEGIN_DATE[market][category]
-    # start = datetime(2019, 1, 1)   # 数据已经确定下载不再需要比对
     ret = pd.to_datetime([])
-    start += timedelta(1)
     try:
         # 当天 5点后才下载当天数据
         today = datetime.today()
@@ -54,7 +50,7 @@ def get_download_file_index(market, category, start=datetime(2019, 4, 1)):
         log.info('From {} to today are not in trading calender!'.format(start))
         return ret
 
-    file_index = get_exist_files(market, category).index
+    file_index = get_exist_files(target).index
 
     if file_index.empty:
         file_index = trade_index
@@ -83,7 +79,9 @@ def get_insert_mongo_files(market, category, start=datetime(2000, 1, 1)):
 
     date_index = cursor.distinct('datetime', {'market': market, 'datetime': {'&gte': start}})
 
-    file_df = get_exist_files(market, category)
+    data_dir = RAW_HQ_DIR[category] / market
+
+    file_df = get_exist_files(data_dir)
     file_df = file_df[start:]
 
     if len(date_index) == 0:
@@ -96,27 +94,25 @@ def get_insert_mongo_files(market, category, start=datetime(2000, 1, 1)):
     return file_df
 
 
-def get_exist_files(market, category):
+def get_exist_files(data_dir):
     """
     计算需要下载的文件
-    :param market:
-    :param category:
+    :param data_dir: 数据文件存放目录，以日期格式命名的文件。
     :return:
     pandas.DataFrame
         datetime: index
         filepath: pathlib.Path
     """
-    source = RAW_HQ_DIR[category] / market
     ret = pd.DataFrame()
 
-    if not source.exists():
-        source.parent.mkdir(parents=True, exist_ok=True)
-        source.mkdir(parents=True, exist_ok=True)
+    if not data_dir.exists():
+        data_dir.parent.mkdir(parents=True, exist_ok=True)
+        data_dir.mkdir(parents=True, exist_ok=True)
         file_df = ret
     else:
         try:
             file_df = pd.DataFrame([(pd.to_datetime(re.search(DATE_PATTERN, x.name)[0]), x)
-                                    for x in source.glob('[0-9][0-9][0-9][0-9]*')], columns=['datetime', 'filepath'])
+                                    for x in data_dir.glob('[0-9][0-9][0-9][0-9]*')], columns=['datetime', 'filepath'])
             file_df.set_index('datetime', inplace=True)
         except TypeError:  # 目录存在但没有文件
             file_df = ret

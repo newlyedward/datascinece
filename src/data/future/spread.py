@@ -2,11 +2,13 @@
 import pandas as pd
 import numpy as np
 import time
-from datetime import datetime
 import re
+from datetime import datetime, timedelta
+from pymongo import ASCENDING, DESCENDING
 
-from src.data.future.setting import SPREAD_DIR
-from src.data.future.utils import get_download_file_index
+from src.data import conn
+from src.data.future.setting import SPREAD_DIR, NAME2CODE_MAP
+from src.data.future.utils import get_download_file_index, get_exist_files, move_data_files
 from log import LogHandler
 from src.util import get_html_tree
 
@@ -20,7 +22,7 @@ HEADER = ["商品", "现货价格", "最近合约代码", "最近合约价格", 
 #            'dominant_price', 'dominant_basis', 'dominant_basis_prt', 'datetime', 'exchange']
 
 
-def get_spreads_from_100ppi(date_str):
+def download_spot_by_date(date_str):
     """
     http://www.100ppi.com/sf/  最新的期现表
     http://www.100ppi.com/sf/day-{}.html 历史期限表，填入%Y-%m-%d
@@ -53,17 +55,13 @@ def get_spreads_from_100ppi(date_str):
     return data
 
 
-def get_future_spreads(start=None, end=None):
+def download_spot_by_dates(start=datetime(2011, 1, 1)):
     """
     下载数据，存储为csv文件
     :param start: 2011-01-01 最早数据
-    :param end:
     :return: True 下载文件 False 没有下载文件
     """
-    start = datetime(2011, 1, 1) if start is None else start
-    end = datetime.today() if end is None else start
-
-    file_index = get_download_file_index(SPREAD_DIR, 'csv', start=start, end=end)
+    file_index = get_download_file_index(SPREAD_DIR, start=start)
 
     if file_index.empty:
         return False
@@ -74,20 +72,64 @@ def get_future_spreads(start=None, end=None):
         if file_path.exists():
             continue
 
-        table = get_spreads_from_100ppi(date_str)
+        table = download_spot_by_date(date_str)
         if len(table) != 0:
             print(date)
             spread_df = pd.DataFrame(table, columns=HEADER)
             spread_df.to_csv(str(file_path), index=False, encoding='gb2312')
-        time.sleep(np.random.rand() * 90)
+        time.sleep(np.random.rand() * 5)
     return True
+
+
+def insert_spot_to_mongo():
+    cursor = conn['spot_price']
+    start = cursor.find_one({}, sort=[("datetime", DESCENDING)])
+    if start is None:
+        result = download_spot_by_dates()
+    else:
+        start = start['datetime']
+        result = download_spot_by_dates(start=start)
+
+    if not result:
+        log.info('Data files are inserted before!')
+        return
+
+    # date_index = cursor.distinct('datetime', {'datetime': {'&gt': start}})
+
+    file_df = get_exist_files(SPREAD_DIR)
+    if start is not None:
+        file_df = file_df[start + timedelta(1):]
+
+    # if len(date_index) != 0:
+    #     mongo_index = pd.to_datetime(date_index)
+    #     file_index = file_df.index.difference(mongo_index)
+    #     file_df = file_df.loc[file_index]
+
+    if file_df.empty:
+        log.info('Spot price is updated before!')
+        return
+
+    for row in file_df.itertuples():
+        df = pd.read_csv(row.filepath, encoding='gb2312', header=0, index_col=False)
+        spot_df = df[['商品', '现货价格']]
+        spot_df.columns = ['code', 'spot']
+        spot_df.loc[:, 'code'] = spot_df['code'].transform(lambda x: NAME2CODE_MAP['spread'][x])
+        spot_df.loc[:, 'datetime'] = row.Index
+
+        result = cursor.insert_many(spot_df.to_dict('records'))
+        if result:
+            print('{} spot price insert success.'.format(row.filepath.name))
+            move_data_files(row.filepath)
+        else:
+            print('{} spot price insert failure.'.format(row.filepath.name))
 
 
 if __name__ == '__main__':
     # end_dt = datetime.today()
-    start_dt = datetime(2017, 1, 1)
+    start_dt = datetime(2019, 3, 19)
     end_dt = datetime(2019, 3, 31)
     print(datetime.now())
-    get_future_spreads(start_dt, end_dt)
+    # download_spot_by_dates(start_dt)
+    insert_spot_to_mongo()
     print(datetime.now())
     # write_to_csv(df)
