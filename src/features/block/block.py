@@ -15,9 +15,9 @@ import scipy.signal as signal
 
 # TODO 改用动态接口
 # get_history_hq_api(code, start=None, end=None, freq='d')
+from src.features import conn
 from src.data.tdx import get_future_hq
 from src.util import connect_mongo
-# from src.setting import DATA_ANALYST, ANALYST_PWD
 from src.api.cons import FREQ
 
 get_history_hq_api = get_future_hq
@@ -428,7 +428,8 @@ def get_peaks_from_segments(segment_df):
     bflag = np.logical_or(np.logical_or(b1, b2), np.logical_or(b3, b4))
 
     peak_df = peak_df.append(segment_df[bflag.values]).sort_index()
-    return peak_df.reset_index(drop=True)
+    peak_df.reset_index(drop=True, inplace=True)
+    return peak_df
 
 
 def get_peaks_from_hq(hq_df):
@@ -457,10 +458,10 @@ def get_peaks_from_hq(hq_df):
     low_df = low_df.iloc[signal.argrelextrema(-low_df.peak.values, np.greater_equal)]
 
     peak_df = high_df.append(low_df).sort_index()
-
+    peak_df.reset_index(drop=True, inplace=True)
     # peak_df.to_excel('peak_ww.xlsx')
 
-    return peak_df.reset_index(drop=True)
+    return peak_df
 
 
 def get_history_hq(code, start_date=None, end_date=None, freq='d'):
@@ -488,7 +489,7 @@ def build_one_instrument_segments(symbol, frequency, instrument='index'):
     :param instrument: 交易品种类型 future option stock bond convertible index
     :return: True 还需要后续处理，不需要后续处理
     """
-    conn = connect_mongo('quote')
+    # conn = connect_mongo('quote')
     segment_cursor = conn['segment']
     inst_cursor = conn[instrument]
 
@@ -647,7 +648,7 @@ def build_one_instrument_blocks(symbol, frequency):
     :param frequency: 频率值，从0-9，从tick到year
     :return:
     """
-    conn = connect_mongo('quote')
+    # conn = connect_mongo('quote')
     block_cursor = conn['block']
     segment_cursor = conn['segment']
 
@@ -761,7 +762,7 @@ if __name__ == "__main__":
     end = datetime(2019, 3, 1)
 
     # build_segments()
-    build_one_instrument_segments('V00', 5)
+    build_one_instrument_segments('CF00', 7)
     # build_one_instrument_blocks('A88', 5)
     # observation = 250
     # start = today - timedelta(observation)
