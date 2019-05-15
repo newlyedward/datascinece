@@ -356,6 +356,7 @@ def transfer_czce_future_hq(date, file_path, columns_map):
 
     hq_df = data_type_conversion(hq_df, 0, list(columns_map.values()), list(columns_map.keys()), date, 'czce')
 
+    # TODO 确认不需要keys，NAME2CODE_MAP['exchange'].keys()
     hq_df['code'] = split_re.transform(
         lambda x: NAME2CODE_MAP['exchange'][x[0]] if x[0] in NAME2CODE_MAP['exchange'].keys() else x[0])
 
