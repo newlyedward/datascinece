@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
-import pandas as pd
-from pymongo import ASCENDING
+import re
 
+import pandas as pd
+from pymongo import ASCENDING, DESCENDING
+
+from src.api import conn
 from src.util import connect_mongo
 from src.api.cons import FREQ
 from src.setting import DATA_ANALYST, ANALYST_PWD
@@ -59,7 +62,7 @@ def get_price(symbol=None, instrument='index', start_date=None, end_date=None, f
         传入多个symbol，函数会返回一个multiIndex DataFrame
     """
     # 连接数据库
-    conn = connect_mongo(db='quote', username=DATA_ANALYST, password=ANALYST_PWD)
+    # conn = connect_mongo(db='quote', username=DATA_ANALYST, password=ANALYST_PWD)
 
     cursor = conn[instrument]
 
@@ -108,7 +111,7 @@ def get_blocks(symbol=None, start_date=None, end_date=None, frequency='d'):
         传入多个symbol，函数会返回一个multiIndexe DataFrame
     """
     # 连接数据库
-    conn = connect_mongo(db='quote', username=DATA_ANALYST, password=ANALYST_PWD)
+    # conn = connect_mongo(db='quote', username=DATA_ANALYST, password=ANALYST_PWD)
 
     cursor = conn['block']
 
@@ -154,7 +157,7 @@ def get_segments(symbol=None, start_date=None, end_date=None, frequency='d'):
         传入多个symbol，函数会返回一个multiIndexe DataFrame
     """
     # 连接数据库
-    conn = connect_mongo(db='quote', username=DATA_ANALYST, password=ANALYST_PWD)
+    # conn = connect_mongo(db='quote', username=DATA_ANALYST, password=ANALYST_PWD)
 
     cursor = conn['segment']
 
@@ -187,6 +190,79 @@ def get_segments(symbol=None, start_date=None, end_date=None, frequency='d'):
     return segment_df
 
 
+def get_peak_start_date(symbol=None, frequency='m', peak_type=None, skip=1):
+    """
+        返回某个趋势极值点的位置，作为分析的起点
+    :param symbol: 合约代码，symbol, symbol list
+    :param peak_type:        'down' 底部 'up' 顶部  None 任意极值点
+    :param skip:        0 倒数第一个
+    :param frequency:   历史数据的频率, 默认为'm', 分析月线的趋势
+    :return:
+        [{symbol:datetime}]   对应symbol的分析起始时间
+    """
+    # 连接数据库
+    # conn = connect_mongo(db='quote', username=DATA_ANALYST, password=ANALYST_PWD)
+
+    cursor = conn['block']
+
+    pipeline = [
+        {
+            '$match': {
+                'symbol': {
+                    '$regex': re.compile(r"88$")
+                },
+                'frequency': FREQ.index(frequency),
+                'sn': 0
+            }
+        }, {
+            '$project': {
+                'start_date': 1,
+                'symbol': 1
+            }
+        }, {
+            '$sort': {
+                'start_date': DESCENDING
+            }
+        }, {
+            '$group': {
+                '_id': '$symbol',
+                'start_date': {
+                    '$push': '$start_date'
+                }
+            }
+        }, {
+            '$project': {
+                '_id': 0,
+                'symbol': "$_id",
+                'start_date': {'$arrayElemAt': ['$start_date', skip]}
+            }
+        }
+    ]
+
+    match_stage = pipeline[0]['$match']
+    if peak_type is not None:
+        match_stage['type'] = peak_type
+
+    if isinstance(symbol, list):
+        match_stage['symbol'] = {'$in': symbol}
+    elif isinstance(symbol, str):
+        match_stage['symbol'] = symbol
+    else:
+        log.debug('Search all instruments snapshot start datetime!')
+
+    dates = cursor.aggregate(pipeline)
+
+    dates_df = pd.DataFrame(list(dates))
+
+    if isinstance(symbol, list):
+        return dates_df
+    elif isinstance(symbol, str):
+        return dates_df.iloc[0, 0]
+    else:
+        return None
+
+
 if __name__ == '__main__':
     symbols = ['A88', 'Y88', 'ME88']
-    # start_dates = get_peak_start_date(symbol=symbols)
+    symbol = "TA88"
+    start_dates = get_peak_start_date(symbol=symbol)

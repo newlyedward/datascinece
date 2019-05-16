@@ -29,9 +29,7 @@ InteractiveShell.ast_node_interactivity = "all"
 # import sys
 # sys.path.append(str(homedir))
 
-from src.features import *
-from src.data.future import *
-from src.data.future import get_spreads
+
 
 
 

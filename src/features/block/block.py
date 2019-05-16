@@ -806,10 +806,10 @@ def build_all_blocks():
         frequency += 1
         while bflag and frequency < 10:
             bflag = build_high_level_segments(symbol, frequency)
-            frequency += 1
-            # if bflag:
-            #     build_blocks(symbol, frequency)
-            #     frequency += 1
+            # frequency += 1
+            if bflag:
+                build_blocks(symbol, frequency)
+                frequency += 1
 
 
 if __name__ == "__main__":
