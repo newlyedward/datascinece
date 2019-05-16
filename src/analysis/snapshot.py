@@ -328,32 +328,7 @@ def get_snapshot(symbol=None, instrument='index', threshold=1e9):
             count_percentile(last_yield['far_month_yield'],
                              yield_df.loc[yield_df['far_month_yield'] != 0, 'far_month_yield'])
 
-    # block status
-    freq = [7, 6, 5]
-    periods = ['month', 'week', 'day']
-    block = ['enter_date', 'type', 'relation', 'sn', 'segment_num']
-    columns = pd.MultiIndex.from_product([periods, block], names=['period', 'block'])
-
-    block_status_df = pd.DataFrame(index=snapshot_df.index, columns=columns)
-
-    block_cursor = conn['block']
-
-    projection = {'_id': 0, 'enter_date': 1, 'type': 1, 'relation': 1, 'sn': 1, 'segment_num': 1}
-
-    for code in block_status_df.index:
-        symbol = code + '88'
-        filter_dict = {'symbol': symbol}
-
-        for period, frequency in zip(periods, freq):
-            filter_dict['frequency'] = frequency
-            block_status = block_cursor.find_one(filter_dict, projection=projection, sort=[('enter_date', DESCENDING)])
-            block_status_df.loc[code, (period, 'enter_date')] = block_status['enter_date']
-            block_status_df.loc[code, (period, 'type')] = block_status['type']
-            block_status_df.loc[code, (period, 'relation')] = block_status['relation']
-            block_status_df.loc[code, (period, 'sn')] = block_status['sn']
-            block_status_df.loc[code, (period, 'segment_num')] = block_status['segment_num']
-
-    return snapshot_df, block_status_df, roll_yield_df
+    return snapshot_df, roll_yield_df
 
 
 if __name__ == '__main__':
