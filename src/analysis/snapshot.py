@@ -302,6 +302,7 @@ def get_snapshot(symbol=None, instrument='index', threshold=1e9):
         else:
             spot_df.set_index('datetime', inplace=True)
             yield_df = pd.concat([spot_df, hq_df], axis=1)
+            yield_df = yield_df.dropna()
             yield_df.columns = ['spot', 'deliver', 'domain', 'far_month']
             yield_df['deliver_yield'] = (yield_df['deliver'] / yield_df['spot'] - 1) * 100
 

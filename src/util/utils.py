@@ -28,4 +28,9 @@ def count_percentile(value, data):
         s = s.sort_values()
         s = s.reset_index(drop=True)
         s = s[s > value]
-        return s.index[0] / (s.index[-1] + 1)
+        if s.empty:
+            return 0
+        else:
+            return s.index[0] / (s.index[-1] + 1) * 100
+
+    return 0

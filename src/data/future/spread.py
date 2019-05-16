@@ -82,6 +82,10 @@ def download_spot_by_dates(start=datetime(2011, 1, 1)):
 
 
 def insert_spot_to_mongo():
+    """
+
+    :return:
+    """
     cursor = conn['spot_price']
     start = cursor.find_one({}, sort=[("datetime", DESCENDING)])
     if start is None:
