@@ -3,6 +3,7 @@ import pandas as pd
 
 from datetime import datetime
 
+from src.api import conn
 from src.util import connect_mongo
 from log import LogHandler
 
@@ -21,11 +22,11 @@ def get_dominant(code, start_date=None, end_date=None):
     :return: pd.DataFrame
     """
     # 连接数据库
-    conn = connect_mongo(db='quote')
+    # conn = connect_mongo(db='quote')
 
     cursor = conn['index']
 
-    filter_dict = {'code': code, 'symbol': code+'99'}
+    filter_dict = {'code': code, 'symbol': code + '99'}
 
     if start_date is not None:  # 使用前一个交易日
         filter_dict['datetime'] = {'$gte': start_date}
@@ -54,7 +55,7 @@ def get_contracts(code, date=None):
     :return: list
     """
     # 连接数据库
-    conn = connect_mongo(db='quote')
+    # conn = connect_mongo(db='quote')
 
     cursor = conn['future']
 
@@ -98,6 +99,63 @@ def get_warehouse_stocks(code, start_date=None, end_date=None):
     """
 
 
+def get_roll_yield(code=None, start_date=datetime(1970, 1, 1), end_date=None):
+    """
+    返回价格数据和展期收益率
+    :param code:
+    :param start_date:
+    :param end_date:
+    :return:
+    """
+    assert isinstance(code, str)
+    index_cursor = conn['index']
+    filter_dict = {
+        'symbol': {"$regex": "^" + code + "[7-9]{2}$"},
+        'datetime': {
+            '$gte': start_date
+        }
+    }
+
+    if end_date:
+        filter_dict['datetime']['$lte'] = end_date
+
+    projection = {
+        "_id": 0,
+        "symbol": 1,
+        "datetime": 1,
+        "close": 1
+    }
+
+    hq = index_cursor.find(filter_dict, projection=projection)
+
+    hq_df = pd.DataFrame(list(hq))
+    hq_df = hq_df.pivot(index='datetime', columns='symbol', values='close')
+
+    spot_cursor = conn['spot_price']
+    filter_dict = {"code": code}
+    projection = {"_id": 0, "datetime": 1, "spot": 1}
+    spot = spot_cursor.find(filter_dict, projection=projection)
+    spot_df = pd.DataFrame(list(spot))
+
+    name = {'deliver': code + '77',
+            'domain': code + '88',
+            'far_month': code + '99'}
+    if spot_df.empty:
+        yield_df = hq_df
+    else:
+        spot_df.set_index('datetime', inplace=True)
+        yield_df = pd.concat([spot_df, hq_df], axis=1)
+        yield_df = yield_df.dropna()
+        yield_df['deliver_basis'] = (yield_df[name['deliver']] / yield_df['spot'] - 1) * 100
+        yield_df['domain_basis'] = (yield_df[name['domain']] / yield_df['spot'] - 1) * 100
+        yield_df['far_month_basis'] = (yield_df[name['far_month']] / yield_df['spot'] - 1) * 100
+
+    yield_df['nearby_yield'] = (yield_df[name['domain']] / yield_df[name['deliver']] - 1) * 100
+    yield_df['far_month_yield'] = (yield_df[name['far_month']] / yield_df[name['domain']] - 1) * 100
+
+    return yield_df
+
+
 if __name__ == '__main__':
     start = datetime(2019, 1, 1)
     end = datetime(2006, 8, 3)
@@ -108,4 +166,3 @@ if __name__ == '__main__':
     # df = get_dominant('CU', start_date=start, end_date=end)
     # df = get_dominant('CU', end_date=start)
     # df = get_price(['CU88', 'M88'], start_date=start, end_date=end, fields=['open', 'close'])
-

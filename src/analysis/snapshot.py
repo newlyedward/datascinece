@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 from pymongo import DESCENDING
 
-from src.api import FREQ
+from src.api import FREQ, get_peak_start_date
 from src.analysis import conn
 
 from log import LogHandler

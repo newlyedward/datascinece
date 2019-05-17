@@ -115,7 +115,7 @@ def insert_spot_to_mongo():
 
     for row in file_df.itertuples():
         df = pd.read_csv(row.filepath, encoding='gb2312', header=0, index_col=False)
-        spot_df = df[['商品', '现货价格']]
+        spot_df = df.loc[:, ['商品', '现货价格']]
         spot_df.columns = ['code', 'spot']
         spot_df.loc[:, 'code'] = spot_df['code'].transform(lambda x: NAME2CODE_MAP['spread'][x])
         spot_df.loc[:, 'datetime'] = row.Index

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import re
+from datetime import datetime
 
 import pandas as pd
 from pymongo import ASCENDING, DESCENDING
@@ -263,6 +264,7 @@ def get_peak_start_date(symbol=None, frequency='m', peak_type=None, skip=1):
 
 
 if __name__ == '__main__':
-    symbols = ['A88', 'Y88', 'ME88']
+    # symbols = ['A88', 'Y88', 'ME88']
     symbol = "TA88"
-    start_dates = get_peak_start_date(symbol=symbol)
+    start_date = get_peak_start_date(symbol=symbol)
+    # get_roll_yield(code="TA", start_date=start_date)
