@@ -118,7 +118,7 @@ def get_blocks(symbol=None, start_date=None, end_date=None, frequency='d'):
 
     frequency = FREQ.index(frequency)
 
-    filter_dict = {'frequency': frequency}
+    filter_dict = {}
 
     if isinstance(symbol, list):
         filter_dict['symbol'] = {'$in': symbol}
@@ -127,18 +127,20 @@ def get_blocks(symbol=None, start_date=None, end_date=None, frequency='d'):
     else:
         log.debug('Return all commodities blocks!')
 
+    filter_dict['frequency'] = frequency
+
     if start_date is not None:
-        filter_dict['datetime'] = {'$gte': start_date}
+        filter_dict['start_date'] = {'$gte': start_date}
 
     if end_date is not None:
-        if 'datetime' in filter_dict:
-            filter_dict['enter_date']['$lte'] = end_date
+        if 'start_date' in filter_dict:
+            filter_dict['start_date']['$lte'] = end_date
         else:
-            filter_dict['enter_date'] = {'$lte': end_date}
+            filter_dict['start_date'] = {'$lte': end_date}
 
     project_dict = {'_id': 0}
 
-    blocks = cursor.find(filter_dict, project_dict)
+    blocks = cursor.find(filter_dict, project_dict).sort('start_date', ASCENDING)
 
     # Expand the cursor and construct the DataFrame
     block_df = pd.DataFrame(list(blocks))
@@ -164,7 +166,7 @@ def get_segments(symbol=None, start_date=None, end_date=None, frequency='d'):
 
     frequency = FREQ.index(frequency)
 
-    filter_dict = {'frequency': {'$gte': frequency}}
+    filter_dict = {}
 
     if isinstance(symbol, list):
         filter_dict['symbol'] = {'$in': symbol}
@@ -172,6 +174,8 @@ def get_segments(symbol=None, start_date=None, end_date=None, frequency='d'):
         filter_dict['symbol'] = symbol
     else:
         log.debug('Return all commodities segments!')
+
+    filter_dict['frequency'] = {'$gte': frequency}
 
     if start_date is not None:
         filter_dict['datetime'] = {'$gte': start_date}
@@ -184,7 +188,7 @@ def get_segments(symbol=None, start_date=None, end_date=None, frequency='d'):
 
     project_dict = {'_id': 0}
 
-    segments = cursor.find(filter_dict, project_dict)
+    segments = cursor.find(filter_dict, project_dict).sort('datetime', ASCENDING)
 
     # Expand the cursor and construct the DataFrame
     segment_df = pd.DataFrame(list(segments))
@@ -265,6 +269,7 @@ def get_peak_start_date(symbol=None, frequency='m', peak_type=None, skip=1):
 
 if __name__ == '__main__':
     # symbols = ['A88', 'Y88', 'ME88']
-    symbol = "TA88"
+    symbol = "I88"
     start_date = get_peak_start_date(symbol=symbol)
+    get_blocks(symbol, start_date=start_date, frequency='m')
     # get_roll_yield(code="TA", start_date=start_date)
