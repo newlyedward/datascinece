@@ -85,21 +85,21 @@ def download_czce_hq_by_date(date: datetime, category=0):
     index = 0
     ret = pd.DataFrame()
 
-    if date < datetime(2005, 4, 29):
-        return pd.DataFrame()
-    elif date < datetime(2010, 8, 24):
-        url_template = 'http://www.czce.com.cn/cn/exchange/jyxx/hq/hq{}.html'
-        url = url_template.format(date.strftime('%Y%m%d'))
-        index = 1
-    elif date < datetime(2015, 10, 8):
-        url_template = 'http://www.czce.com.cn/cn/exchange/{}/datadaily/{}.htm'
-        url = url_template.format(date.year, date.strftime('%Y%m%d'))
-        index = 3
-    else:
+    if date > datetime(2015, 10, 7):
         template = ['http://www.czce.com.cn/cn/DFSStaticFiles/Future/{}/{}/FutureDataDaily.htm',
                     'http://www.czce.com.cn/cn/DFSStaticFiles/Option/{}/{}/OptionDataDaily.htm']
         url_template = template[category]
         url = url_template.format(date.year, date.strftime('%Y%m%d'))
+    elif date > datetime(2010, 8, 23):
+        url_template = 'http://www.czce.com.cn/cn/exchange/{}/datadaily/{}.htm'
+        url = url_template.format(date.year, date.strftime('%Y%m%d'))
+        index = 3
+    elif date > datetime(2005, 4, 28):
+        url_template = 'http://www.czce.com.cn/cn/exchange/jyxx/hq/hq{}.html'
+        url = url_template.format(date.strftime('%Y%m%d'))
+        index = 1
+    else:
+        return pd.DataFrame()
 
     text = get_html_text(url)
 
