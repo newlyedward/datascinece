@@ -3,6 +3,10 @@ import re
 import numpy as np
 import pandas as pd
 
+from log import LogHandler
+
+log = LogHandler('util.log')
+
 
 def convert_percent(value):
     """
@@ -32,5 +36,5 @@ def count_percentile(value, data):
             return 0
         else:
             return s.index[0] / (s.index[-1] + 1) * 100
-
+    log.warning('The data is type of {}, pd.Series type required!'.format(type(data)))
     return 0
