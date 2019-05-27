@@ -11,9 +11,10 @@ from pymongo import ASCENDING, DESCENDING
 from src.data import conn
 from src.data.setting import TRADE_BEGIN_DATE
 from src.data.future.setting import NAME2CODE_MAP, COLUMNS_MAP
-from src.data.future.utils import get_download_file_index, get_insert_mongo_files, move_data_files, get_exist_files
+from src.data.future.utils import get_download_file_index, move_data_files, get_exist_files, \
+    split_symbol
 from src.data.setting import RAW_HQ_DIR, INSTRUMENT_TYPE
-from src.util import get_post_text, get_html_text, connect_mongo
+from src.util import get_post_text, get_html_text
 from log import LogHandler
 
 # TIME_WAITING = 1
@@ -444,26 +445,6 @@ def transfer_cffex_future_hq(date, file_path, columns_map):
     return hq_df
 
 
-def split_symbol(pattern, s):
-    """
-    对合约代码分析，并用正则表达式进行提取
-            期货：商品代码
-            期权：商品代码，期货合约代码，期权类型和行权价格
-    :param pattern: 正则表达式
-    :param s: symbol columns
-    :return:
-        pd.Series, idx 提取出信息对应的索引bool值
-    """
-    assert isinstance(s, pd.Series)
-
-    split_s = s.transform(lambda x: re.search(pattern, str(x)))
-    idx = ~split_s.isna().values
-    if not idx.all():
-        split_s = split_s.dropna()
-        log.debug("There are some Nan in re search!")
-    return split_s, idx
-
-
 def transfer_dce_option_hq(date, file_path, columns_map):
     """
     将每天的数据统一标准
@@ -588,8 +569,6 @@ def insert_hq_to_mongo():
     """
     category = [0, 1]
     market = ['dce', 'czce', 'shfe', 'cffex']
-
-    # conn = connect_mongo(db='quote')
 
     transfer_exchange_hq_func = [
         {
@@ -826,7 +805,6 @@ if __name__ == '__main__':
     # row = Pandas(Index=date, filepath=filepath)
     # df = transfer_exchange_data(row, market='shfe', category=1)
     # result = to_mongo('quote', 'option', df.to_dict('records'))
-    # TODO 交易日历+自动下载
     insert_hq_to_mongo()
     build_future_index()
     print(datetime.now())

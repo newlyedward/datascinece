@@ -22,7 +22,7 @@ def get_future_calender(start=None, end=None, country='cn'):
     :param country: 默认是中国市场('cn')，目前仅支持中国市场
     :return: pd.Index
     """
-    # if start > datetime.today():
+    # if start_date > datetime.today():
     #     return pd.DatetimeIndex(freq='1D')
     df = get_future_hq('cuL9', start=start, end=end)
     if df is None:
@@ -136,6 +136,26 @@ def move_data_files(src, dst=BACKUP_DIR):
         parent.mkdir(parents=True)
 
     src.rename(dst)
+
+
+def split_symbol(pattern, s):
+    """
+    对合约代码分析，并用正则表达式进行提取
+            期货：商品代码
+            期权：商品代码，期货合约代码，期权类型和行权价格
+    :param pattern: 正则表达式
+    :param s: symbol columns
+    :return:
+        pd.Series, idx 提取出信息对应的索引bool值
+    """
+    assert isinstance(s, pd.Series)
+
+    split_s = s.transform(lambda x: re.search(pattern, str(x)))
+    idx = ~split_s.isna().values
+    if not idx.all():
+        split_s = split_s.dropna()
+        log.debug("There are some Nan in re search!")
+    return split_s, idx
 
 
 if __name__ == '__main__':

@@ -20,7 +20,7 @@ columns = ['commodity', 'sprice', 'recent_code', 'recent_price', 'recent_basis',
 def construct_spreads(end=None):
     """
     hdf5 文件知道如何插入记录，暂时只能添加在文件尾部，因此要保证 历史数据连续
-    start=datetime(2011, 1, 2),
+    start_date=datetime(2011, 1, 2),
     :param end:
     :return:
     """
@@ -117,6 +117,6 @@ if __name__ == '__main__':
     start_dt = datetime(2018, 12, 21)
     end_dt = datetime(2019, 3, 31)
     print(datetime.now())
-    # get_future_inventory(start=datetime(2014, 5, 23), end=datetime.today())
+    # get_future_inventory(start_date=datetime(2014, 5, 23), end=datetime.today())
     df = get_spreads('M', start=start_dt, end=None)
     print(datetime.now())
