@@ -21,6 +21,13 @@ DATA_BEGIN_DATE = {'czce': datetime(2008, 2, 15),
                    'shfe': datetime(2008, 10, 6),
                    'dce': datetime(2006, 1, 6)}
 
+SHFE_SPECIAL_DATE = (datetime(2010, 1, 26), datetime(2010, 1, 20), datetime(2010, 4, 16))
+SHFE_SPECIAL_INDEX = ((11, 28, 40, 56, 71, 74, 93, 112),
+                      (12, 29, 42, 58, 73, 76, 95, 114),
+                      (11, 29, 42, 59, 75, 80, 102, 122))
+SHFE_SPECIAL_COL = ('2', '2', '5')
+SHFE_SPECIAL_CODE = ('CU', 'AL', 'ZN', 'RU', 'FU', 'AU', 'RB', 'WR')
+
 TIME_WAITING = 1
 
 
@@ -210,27 +217,39 @@ def transfer_shfe_receipt(date, file_path):
     """
     data = pd.DataFrame(columns=['code', 'datetime', 'receipt', 'market'])
 
-    receipt_df = pd.read_csv(file_path, encoding='gb2312', header=0, index_col=False)
+    receipt_df = pd.read_csv(file_path, encoding='gb2312', header=0, index_col=0)
 
     if receipt_df.empty:
         log.warning('Shfe {} receipt file is empty!')
         return data
 
     if date > datetime(2014, 5, 18):
-        split_re, index = split_symbol(r'(\S+)\$\$\S+$', receipt_df['VARNAME'])
-        data['code'] = split_re.transform(
-            lambda x: NAME2CODE_MAP['exchange'][x[1]] if x[1] in NAME2CODE_MAP['exchange'] else x[1])
-        data['code'].duplicated()
-        split_re, index = split_symbol(r'总计\$\$Total', receipt_df['WHABBRNAME'])
-        data['receipt'] = receipt_df.loc[index, 'WRTWGHTS']
-        data['market'] = 'shfe'
-        data['datetime'] = date
-
+        df = receipt_df.drop_duplicates('VARNAME', keep='last')
+        df.loc[:, 'VARNAME'] = df['VARNAME'].transform(lambda x: re.search(r'(\S+)\$\$', x)[1])
+        df.loc[:, 'VARNAME'] = df['VARNAME'].transform(
+            lambda x: NAME2CODE_MAP['exchange'][x] if x in NAME2CODE_MAP['exchange'] else x)
+        bu_receipt = df.loc[df['VARNAME'] == 'BU', 'WRTWGHTS'].sum()
+        df = df.drop_duplicates('VARNAME')
+        df.loc[df['VARNAME'] == 'BU', 'WRTWGHTS'] = bu_receipt
+        data['code'] = df['VARNAME']
+        data['receipt'] = df['WRTWGHTS']
     elif date > datetime(2008, 1, 5):
-
-
+        index = receipt_df[receipt_df.loc[:, '0'].isna()].index
+        data['code'] = receipt_df.loc[index, '0'].transform(
+            lambda x: NAME2CODE_MAP['exchange'][x] if x in NAME2CODE_MAP['exchange'] else x).values
+        index1 = index[1:] - 1
+        index2 = receipt_df[receipt_df.loc[:, '0'] == '总 计'].index
+        idx = index1.union(index2)
+        assert len(index) == len(idx)
+        data['receipt'] = pd.to_numeric(receipt_df.loc[idx, '2'].values)
+        bu_receipt = data.loc[data['code'] == 'BU', 'receipt'].sum()
+        data = data.drop_duplicates('code')
+        data.loc[data['code'] == 'BU', 'receipt'] = bu_receipt
     else:
         log.error("{} shfe receipt date is not exist!".format(date.strftime('%Y%m%d')))
+
+    data.loc[:, 'market'] = 'shfe'
+    data.loc[:, 'datetime'] = date
 
     return data
 
@@ -312,9 +331,13 @@ def insert_receipt_to_mongo():
 
 if __name__ == '__main__':
     print(datetime.now())
-    # start_date = datetime(2019, 5, 16)
+    start_date = datetime(2010, 1, 26)
     # download_receipt_by_date(start_date)
     # 数据从20060106开始，每周五更新仓单数据。直到20090407起，每交易日都更新仓单数据
     # download_dce_receipt_by_date(start_date)
-    insert_receipt_to_mongo()
+    # insert_receipt_to_mongo()
+    from pathlib import Path
+
+    file_path = Path(r'E:\datascinece\data\raw\future\receipt\shfe') / (start_date.strftime('%Y%m%d') + '.csv')
+    transfer_shfe_receipt(start_date, file_path)
     print(datetime.now())
