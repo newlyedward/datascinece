@@ -1,15 +1,23 @@
 import re
 import numpy as np
 import pandas as pd
+from openpyxl.styles import Alignment
+from pandas.core.indexes.frozen import FrozenList
 from datetime import datetime, timedelta
-from pymongo import DESCENDING
 
+from openpyxl.utils.dataframe import dataframe_to_rows
+from pymongo import DESCENDING
+from openpyxl import Workbook
+from openpyxl.worksheet.table import Table, TableStyleInfo
+
+from src.analysis.setting import REPORT_DIR
 from src.api import get_peak_start_date
 from src.analysis import conn
 
 from log import LogHandler
 from src.data.future.setting import CODE2NAME_MAP
-from src.util import count_percentile
+
+# from src.util import count_percentile
 
 log = LogHandler('analysis.log')
 
@@ -173,12 +181,13 @@ def get_future_snapshot(symbol=None, instrument='index', threshold=1e9):
         last_hq = hq_df.iloc[0]
 
         code = last_hq['code']
+        snapshot_df.loc[code, 'name'] = CODE2NAME_MAP.get(code, code)
+
         close = last_hq['close']
         highest = hq_df['high'].max()
         lowest = hq_df['low'].min()
-        snapshot_df.loc[code, 'wave_rt'] = (close - lowest) / (highest - lowest) * 100
+        snapshot_df.loc[code, 'wave_rt'] = (close - lowest) / (highest - lowest)
 
-        snapshot_df.loc[code, 'name'] = CODE2NAME_MAP.get(code, code)
         snapshot_df.loc[code, 'amount'] = last_hq['amount'] / 1e8
         snapshot_df.loc[code, 'close'] = close
         snapshot_df.loc[code, 'highest'] = highest
@@ -227,17 +236,17 @@ def get_future_snapshot(symbol=None, instrument='index', threshold=1e9):
             yield_df = pd.concat([spot_df, hq_df], axis=1)
             yield_df = yield_df.dropna()
             yield_df.columns = ['spot', 'deliver', 'domain', 'far_month']
-            yield_df['deliver_basis'] = (yield_df['deliver'] / yield_df['spot'] - 1) * 100
-            yield_df['domain_basis'] = (yield_df['domain'] / yield_df['spot'] - 1) * 100
-            yield_df['far_month_basis'] = (yield_df['far_month'] / yield_df['spot'] - 1) * 100
+            yield_df['deliver_basis'] = (yield_df['deliver'] / yield_df['spot'] - 1)
+            yield_df['domain_basis'] = (yield_df['domain'] / yield_df['spot'] - 1)
+            yield_df['far_month_basis'] = (yield_df['far_month'] / yield_df['spot'] - 1)
 
             last_yield = yield_df.iloc[-1]
 
             snapshot_df.loc[code, 'domain_basis'] = last_yield['domain_basis']
             snapshot_df.loc[code, 'far_month_basis'] = last_yield['far_month_basis']
 
-        yield_df['nearby_yield'] = (yield_df['domain'] / yield_df['deliver'] - 1) * 100
-        yield_df['far_month_yield'] = (yield_df['far_month'] / yield_df['domain'] - 1) * 100
+        yield_df['nearby_yield'] = (yield_df['domain'] / yield_df['deliver'] - 1)
+        yield_df['far_month_yield'] = (yield_df['far_month'] / yield_df['domain'] - 1)
 
         last_yield = yield_df.iloc[-1]
 
@@ -250,15 +259,73 @@ def get_future_snapshot(symbol=None, instrument='index', threshold=1e9):
     return snapshot_df
 
 
+def generate_future_report():
+    report_dir = REPORT_DIR / 'future'
+    future_filepath = report_dir / 'snapshot{}.xlsx'.format(datetime.today().strftime('%Y%m%d'))
+
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    if future_filepath.exists():
+        # snapshot_filepath.unlink()
+        # wb = load_workbook(future_filepath)
+        print("{} is exists!".format(future_filepath.name))
+
+    wb = Workbook()
+
+    ws = wb.active
+    ws.title = 'snapshot'
+    snapshot_df = get_future_snapshot(threshold=1e11)
+
+    df = snapshot_df[
+        ['name', 'wave_rt', 'deliver_basis', 'domain_basis', 'far_month_basis', 'nearby_yield', 'far_month_yield',
+         'amount', 'highest', 'lowest', 'close', 'contract', 'start_date', 'datetime']]
+
+    columns = ['交易品种', '价格比例', '交割基差', '主力基差', '远月基差', '交割换月价差', '远月换月价差',
+               '成交金额', '最高价', '最低价', '收盘价', '主力合约', '开始日期', '更新日期']
+    ws.append(columns)
+    values = df.values.tolist()
+    for value in values:
+        ws.append(value)
+
+    bottom_right = ws.cell(row=len(snapshot_df) + 1,
+                           column=len(snapshot_df.columns)).coordinate
+    snapshot_range = "A1:{}".format(bottom_right)
+
+    for col in ws.iter_cols(min_col=1, max_col=len(snapshot_df.columns), min_row=1, max_row=len(snapshot_df) + 1):
+        for cell in col:
+            i = cell.column
+            cell.alignment = Alignment(horizontal='right', vertical='center')
+            if i in range(1, 7):
+                cell.number_format = '0.00%'
+            elif i in range(7, 11):
+                cell.number_format = '#,##0'
+            elif i in range(12, 14):
+                cell.number_format = 'mm-dd-yy'
+
+    tab = Table(displayName='snapshot', ref=snapshot_range)
+
+    style = TableStyleInfo(name="TableStyleMedium9",
+                           showFirstColumn=False,
+                           showLastColumn=False,
+                           showRowStripes=False,
+                           showColumnStripes=True)
+    tab.tableStyleInfo = style
+
+    ws.add_table(tab)
+
+    wb.save(future_filepath)
+
+
 if __name__ == '__main__':
     # symbols = ['A88', 'Y88', 'ME88']
     # symbols = get_instrument_symbols(by='amount')
     # start_dates = get_peak_start_date(symbol=symbols)
     # print(start_dates)
     # last_price_df = get_last_price(symbol=symbols)
-    snapshot_df = get_future_snapshot(threshold=1e11)
-    with pd.ExcelWriter('output.xlsx') as writer:
-        snapshot_df.to_excel(writer, sheet_name='snapshot')
-        # block_status_df.to_excel(writer, sheet_name='block_status')
-        # roll_yield_df.to_excel(writer, sheet_name='roll_yield')
+    # snapshot_df = get_future_snapshot(threshold=1e11)
+    # with pd.ExcelWriter('output.xlsx') as writer:
+    #     snapshot_df.to_excel(writer, sheet_name='snapshot')
+    # block_status_df.to_excel(writer, sheet_name='block_status')
+    # roll_yield_df.to_excel(writer, sheet_name='roll_yield')
     # print(last_price_df)
+    generate_future_report()
