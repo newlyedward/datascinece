@@ -1,20 +1,18 @@
 import re
-import numpy as np
-import pandas as pd
-from openpyxl.styles import Alignment
-from pandas.core.indexes.frozen import FrozenList
 from datetime import datetime, timedelta
 
-from openpyxl.utils.dataframe import dataframe_to_rows
-from pymongo import DESCENDING
+import numpy as np
+import pandas as pd
 from openpyxl import Workbook
+from openpyxl.formatting.rule import ColorScaleRule
+from openpyxl.styles import Alignment
 from openpyxl.worksheet.table import Table, TableStyleInfo
-
-from src.analysis.setting import REPORT_DIR
-from src.api import get_peak_start_date
-from src.analysis import conn
+from pymongo import DESCENDING
 
 from log import LogHandler
+from src.analysis import conn
+from src.analysis.setting import REPORT_DIR
+from src.api import get_peak_start_date
 from src.data.future.setting import CODE2NAME_MAP
 
 # from src.util import count_percentile
@@ -274,7 +272,7 @@ def generate_future_report():
 
     ws = wb.active
     ws.title = 'snapshot'
-    snapshot_df = get_future_snapshot(threshold=1e11)
+    snapshot_df = get_future_snapshot(threshold=1e10)
 
     df = snapshot_df[
         ['name', 'wave_rt', 'deliver_basis', 'domain_basis', 'far_month_basis', 'nearby_yield', 'far_month_yield',
@@ -287,19 +285,23 @@ def generate_future_report():
     for value in values:
         ws.append(value)
 
-    bottom_right = ws.cell(row=len(snapshot_df) + 1,
+    max_row = len(snapshot_df) + 1
+    bottom_right = ws.cell(row=max_row,
                            column=len(snapshot_df.columns)).coordinate
     snapshot_range = "A1:{}".format(bottom_right)
+
+    first_row = ws.row_dimensions[0]
+    first_row.alignment = Alignment(horizontal='center', vertical='center')
 
     for col in ws.iter_cols(min_col=1, max_col=len(snapshot_df.columns), min_row=1, max_row=len(snapshot_df) + 1):
         for cell in col:
             i = cell.column
             cell.alignment = Alignment(horizontal='right', vertical='center')
-            if i in range(1, 7):
+            if i in range(1, 8):
                 cell.number_format = '0.00%'
-            elif i in range(7, 11):
+            elif i in range(8, 12):
                 cell.number_format = '#,##0'
-            elif i in range(12, 14):
+            elif i in [13, 14]:
                 cell.number_format = 'mm-dd-yy'
 
     tab = Table(displayName='snapshot', ref=snapshot_range)
@@ -312,6 +314,17 @@ def generate_future_report():
     tab.tableStyleInfo = style
 
     ws.add_table(tab)
+
+    color_rule = ColorScaleRule(
+        start_type='min', start_color='32CD32',
+        mid_type='percentile', mid_value=50, mid_color='FFFF00',
+        end_type='max', end_color='FF6347')
+
+    columns_formatting = ['B', 'D', 'E', 'G']
+
+    for col in columns_formatting:
+        range_formatting = '{0}2:{0}{1}'.format(col, max_row)
+        ws.conditional_formatting.add(range_formatting, color_rule)
 
     wb.save(future_filepath)
 

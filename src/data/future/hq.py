@@ -729,13 +729,17 @@ def build_future_index():
             s = s[:min(3, len(s))]  # 预防合约小于3的情况,避免出现交割月和主力合约重合，主力合约和下月合约重合
             domain = s.index[0]
             contract_df.loc[date, 'domain'] = domain
-            s.sort_index(inplace=True)
-            contract_df.loc[date, 'near'] = s.index[0]
-            idx = s.index.get_loc(domain) + 1
-            if idx >= len(s):  # 远月合约持仓较少，不会存在换月情况，只会和交割月合约交换
-                log.debug('{}:{} Far month openInt is few.'.format(code, date.strftime('%Y-%m-%d')))
-                idx = len(s) - 1
-            contract_df.loc[date, 'next'] = s.index[idx]
+            contract_df.loc[date, 'near'] = s.index.min()
+            try:
+                if s.index[1] > domain:
+                    contract_df.loc[date, 'next'] = s.index[1]
+                elif s.index[2] > domain:
+                    contract_df.loc[date, 'next'] = s.index[2]
+                else:
+                    contract_df.loc[date, 'next'] = domain
+            except IndexError:
+                print("{} domain contract is the last contract {}".format(code, domain))
+                contract_df.loc[date, 'next'] = domain
 
         pre_contract_df = contract_df.shift(1).dropna()
         # length = len(contract_df)
