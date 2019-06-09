@@ -146,12 +146,12 @@ def get_roll_yield(code=None, start_date=datetime(1970, 1, 1), end_date=None):
         spot_df.set_index('datetime', inplace=True)
         yield_df = pd.concat([spot_df, hq_df], axis=1)
         yield_df = yield_df.dropna()
-        yield_df['deliver_basis'] = (yield_df[name['deliver']] / yield_df['spot'] - 1) * 100
-        yield_df['domain_basis'] = (yield_df[name['domain']] / yield_df['spot'] - 1) * 100
-        yield_df['far_month_basis'] = (yield_df[name['far_month']] / yield_df['spot'] - 1) * 100
+        yield_df['deliver_basis'] = (yield_df[name['deliver']] / yield_df['spot'] - 1)
+        yield_df['domain_basis'] = (yield_df[name['domain']] / yield_df['spot'] - 1)
+        yield_df['far_month_basis'] = (yield_df[name['far_month']] / yield_df['spot'] - 1)
 
-    yield_df['nearby_yield'] = (yield_df[name['domain']] / yield_df[name['deliver']] - 1) * 100
-    yield_df['far_month_yield'] = (yield_df[name['far_month']] / yield_df[name['domain']] - 1) * 100
+    yield_df['nearby_yield'] = (yield_df[name['domain']] / yield_df[name['deliver']] - 1)
+    yield_df['far_month_yield'] = (yield_df[name['far_month']] / yield_df[name['domain']] - 1)
 
     return yield_df
 

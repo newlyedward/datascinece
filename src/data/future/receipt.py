@@ -29,6 +29,7 @@ SHFE_SPECIAL_INDEX = dict(zip(SHFE_SPECIAL_DATE,
 SHFE_SPECIAL_COL = dict(zip(SHFE_SPECIAL_DATE, ('2', '2', '5')))
 SHFE_SPECIAL_CODE = ('CU', 'AL', 'ZN', 'RU', 'FU', 'AU', 'RB', 'WR')
 
+
 # TIME_WAITING = 1
 
 
@@ -278,69 +279,45 @@ def transfer_czce_receipt(date, file_path):
         log.warning('Shfe {} receipt file is empty!')
         return data
 
-    if date > datetime(2015, 10, 7):
+    if date > datetime(2016, 4, 20):  # MA 需要特殊处理， 字段‘仓单数量’出现变化‘仓单数量（完税）/（保税）’
         url_template = 'http://www.czce.com.cn/cn/DFSStaticFiles/Future/{}/{}/FutureDataWhsheet.htm'
         url = url_template.format(date.year, date.strftime('%Y%m%d'))
         index = 1
-    elif date > datetime(2010, 8, 24):
-        s = receipt_df.iloc[:, 0]
-        names = s.loc[0].str.extract(r"品种：\s*(\S+)").dropna()
-
-        data['code'] = names.loc[:, 0].transform(
-            lambda x: NAME2CODE_MAP['exchange'][x] if x in NAME2CODE_MAP['exchange'] else x)
-
-        col_index = np.argwhere(receipt_df.loc[1].values == '仓单数量')[:, 1]
-        columns = receipt_df.columns[col_index]
-
     elif date > datetime(2008, 3, 2) or (date > datetime(2008, 2, 14) and date.weekday() == 4):
-        s = receipt_df.iloc[:, 0].dropna()
-        index_code = s[s.str.contains('品种：').values].index
-        index_col = s[s.str.contains('仓库编号').values].index
-        index_total = s[s.str.contains('总计').values].index
+        s = receipt_df.iloc[:, 0]
+        names = s.str.extract(r"品种：\s*([\u4e00-\u9fa5]+|PTA)").dropna()
 
-        assert (index_code < index_col).all()
-        assert (index_col < index_total).all()
-
-        names = s[index_code].str.extract(r"品种：\s*(\S+)")
         data['code'] = names.loc[:, 0].transform(
             lambda x: NAME2CODE_MAP['exchange'][x] if x in NAME2CODE_MAP['exchange'] else x)
 
-        col_index = np.argwhere(receipt_df.loc[index_col].values == '仓单数量')[:, 1]
-        columns = receipt_df.columns[col_index]
-        data['receipt'] = [receipt_df.loc[idx, col] for (idx, col) in zip(index_total, columns)]
+        col_index = np.argwhere(receipt_df.values == '仓单数量')[:, 1]
+        assert len(col_index) == len(names)
+
+        df = receipt_df[s.str.contains('总计').fillna(False).values]
+        assert len(col_index) == len(df)
+        data['receipt'] = [df.iloc[idx, col] for (idx, col) in zip(range(len(df)), col_index)]
+    # x[:int(len(x) / 2)]
+    # elif date > datetime(2008, 3, 2) or (date > datetime(2008, 2, 14) and date.weekday() == 4):
+    #     s = receipt_df.iloc[:, 0].dropna()
+    #     index_code = s[s.str.contains('品种：').values].index
+    #     # index_col = s[s.str.contains('仓库编号').values].index
+    #     index_total = s[s.str.contains('总计').values].index
+    #
+    #     assert (index_code < index_total).all()
+    #     # assert (index_col < index_total).all()
+    #
+    #     names = s[index_code].str.extract(r"品种：\s*([\u4e00-\u9fa5]+)")
+    #     data['code'] = names.loc[:, 0].transform(
+    #         lambda x: NAME2CODE_MAP['exchange'][x] if x in NAME2CODE_MAP['exchange'] else x)
+    #
+    #     col_index = np.argwhere(receipt_df.values == '仓单数量')[:, 1]
+    #     assert len(col_index) == len(index_code)
+    #     columns = receipt_df.columns[col_index]
+    #
+    #     data['receipt'] = [receipt_df.loc[idx, col] for (idx, col) in zip(index_total, columns)]
     else:
         log.error("{} czce receipt data is not exist!".format(date.strftime('%Y%m%d')))
         return pd.DataFrame()
-
-    # if date > datetime(2014, 5, 18):
-    #     df = receipt_df.drop_duplicates('VARNAME', keep='last')
-    #     df.loc[:, 'VARNAME'] = df['VARNAME'].transform(lambda x: re.search(r'(\S+)\$\$', x)[1])
-    #     df.loc[:, 'VARNAME'] = df['VARNAME'].transform(
-    #         lambda x: NAME2CODE_MAP['exchange'][x] if x in NAME2CODE_MAP['exchange'] else x)
-    #     bu_receipt = df.loc[df['VARNAME'] == 'BU', 'WRTWGHTS'].sum()
-    #     df = df.drop_duplicates('VARNAME')
-    #     df.loc[df['VARNAME'] == 'BU', 'WRTWGHTS'] = bu_receipt
-    #     data['code'] = df['VARNAME']
-    #     data['receipt'] = df['WRTWGHTS']
-    # elif date > datetime(2008, 1, 5):
-    #     if date in SHFE_SPECIAL_DATE:
-    #         data['code'] = SHFE_SPECIAL_CODE
-    #         data['receipt'] = pd.to_numeric(
-    #             receipt_df.loc[SHFE_SPECIAL_INDEX[date], SHFE_SPECIAL_COL[date]].values)
-    #     else:
-    #         index = receipt_df[receipt_df.loc[:, '0'].isna()].index
-    #         data['code'] = receipt_df.loc[index, '0'].transform(
-    #             lambda x: NAME2CODE_MAP['exchange'][x] if x in NAME2CODE_MAP['exchange'] else x).values
-    #         index1 = index[1:] - 1
-    #         index2 = receipt_df[receipt_df.loc[:, '0'] == '总 计'].index
-    #         idx = index1.union(index2)
-    #         assert len(index) == len(idx)
-    #         data['receipt'] = pd.to_numeric(receipt_df.loc[idx, '2'].values)
-    #         bu_receipt = data.loc[data['code'] == 'BU', 'receipt'].sum()
-    #         data = data.drop_duplicates('code')
-    #         data.loc[data['code'] == 'BU', 'receipt'] = bu_receipt
-    # else:
-    #     log.error("{} shfe receipt date is not exist!".format(date.strftime('%Y%m%d')))
 
     data.loc[:, 'market'] = 'czce'
     data.loc[:, 'datetime'] = date
@@ -440,8 +417,11 @@ if __name__ == '__main__':
                       datetime(2010, 8, 25),
                       datetime(2015, 9, 30),
                       datetime(2015, 10, 8),
+                      datetime(2016, 4, 20),
+                      datetime(2016, 4, 21),
                       datetime(2019, 5, 23)]
     from pathlib import Path
+
     for start_date in czce_date_list:
         file_path = Path(r'E:\datascinece\data\raw\future\receipt\czce') / (start_date.strftime('%Y%m%d') + '.csv')
         df = transfer_czce_receipt(start_date, file_path)

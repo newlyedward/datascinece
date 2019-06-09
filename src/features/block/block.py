@@ -262,8 +262,10 @@ def identify_blocks(segment_df: pd.DataFrame):
                 start_date = segment_df.datetime.iloc[index - 1]
                 segment_num = 1
                 block_high = block_highest = current_high = current_highest = row.peak
-                if segment_df.type.iloc[index - 1] == 'low':
-                    pass  # TODO 测试代码
+                if segment_df.type.iloc[index - 1] != 'low':
+                    print('stop at {}, type is {}, prior type is '.format(row.datetime,
+                                                                          row.type, segment_df.type.iloc[index - 1]))
+                    # TODO 测试代码
                 assert segment_df.type.iloc[index - 1] == 'low'
                 block_low = block_lowest = current_low = current_lowest = segment_df.peak.iloc[index - 1]
             else:

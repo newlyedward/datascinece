@@ -4,15 +4,18 @@ from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 from openpyxl import Workbook
-from openpyxl.formatting.rule import ColorScaleRule
+from openpyxl.chart import LineChart, Reference, Series
+from openpyxl.chart.axis import DateAxis
 from openpyxl.styles import Alignment
-from openpyxl.worksheet.table import Table, TableStyleInfo
+from openpyxl.utils.dataframe import dataframe_to_rows
+from openpyxl.worksheet.table import Table
 from pymongo import DESCENDING
 
 from log import LogHandler
 from src.analysis import conn
-from src.analysis.setting import REPORT_DIR
-from src.api import get_peak_start_date
+from src.analysis.setting import REPORT_DIR, TABLE_STYLE, COLOR_RULE, PERCENT_FORMAT, COMMA0_FORMAT, DATE_FORMAT, \
+    PERCENT0_FORMAT
+from src.api import get_peak_start_date, get_price, get_roll_yield
 from src.data.future.setting import CODE2NAME_MAP
 
 # from src.util import count_percentile
@@ -272,7 +275,7 @@ def generate_future_report():
 
     ws = wb.active
     ws.title = 'snapshot'
-    snapshot_df = get_future_snapshot(threshold=1e10)
+    snapshot_df = get_future_snapshot(threshold=1e11)
 
     df = snapshot_df[
         ['name', 'wave_rt', 'deliver_basis', 'domain_basis', 'far_month_basis', 'nearby_yield', 'far_month_yield',
@@ -298,34 +301,105 @@ def generate_future_report():
             i = cell.column
             cell.alignment = Alignment(horizontal='right', vertical='center')
             if i in range(1, 8):
-                cell.number_format = '0.00%'
+                cell.number_format = PERCENT_FORMAT
             elif i in range(8, 12):
-                cell.number_format = '#,##0'
+                cell.number_format = COMMA0_FORMAT
             elif i in [13, 14]:
-                cell.number_format = 'mm-dd-yy'
+                cell.number_format = DATE_FORMAT
 
     tab = Table(displayName='snapshot', ref=snapshot_range)
 
-    style = TableStyleInfo(name="TableStyleMedium9",
-                           showFirstColumn=False,
-                           showLastColumn=False,
-                           showRowStripes=False,
-                           showColumnStripes=True)
-    tab.tableStyleInfo = style
+    tab.tableStyleInfo = TABLE_STYLE
 
     ws.add_table(tab)
-
-    color_rule = ColorScaleRule(
-        start_type='min', start_color='32CD32',
-        mid_type='percentile', mid_value=50, mid_color='FFFF00',
-        end_type='max', end_color='FF6347')
 
     columns_formatting = ['B', 'D', 'E', 'G']
 
     for col in columns_formatting:
         range_formatting = '{0}2:{0}{1}'.format(col, max_row)
-        ws.conditional_formatting.add(range_formatting, color_rule)
+        ws.conditional_formatting.add(range_formatting, COLOR_RULE)
 
+    wb.save(future_filepath)
+
+
+def generate_future_detail_report(code, start_date):
+    """
+    生成单个交易品种的分析
+    :param code: 期货简码
+    :param start_date: 分析数据的起始日期
+    :return:
+    """
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = code
+
+    symbol = code + '88'
+    # hq_df = get_price(symbol=symbol, start_date=start_date)
+
+    # ws_hq = wb.create_sheet(title='hq')
+    #
+    # for r in dataframe_to_rows(hq_df, index=False, header=True):
+    #     ws_hq.append(r)
+
+    basis_df = get_roll_yield(code=code, start_date=start_date)
+    basis_df.reset_index(inplace=True)
+
+    last_domain_close = basis_df[symbol].iloc[-1]
+    last_domain_basis = basis_df.domain_basis.iloc[-1]
+    basis_df['last_domain_close'] = last_domain_close
+    basis_df['last_domain_basis'] = last_domain_basis
+
+    ws_basis = wb.create_sheet(title='basis')
+
+    for r in dataframe_to_rows(basis_df, index=False, header=True):
+        ws_basis.append(r)
+
+    # 基差图
+    chart_basis = LineChart()
+    chart_basis.title = "Basis"
+    chart_basis.height = 15  # default is 7.5
+    chart_basis.width = 45  # default is 15
+    chart_basis.style = 2
+    chart_basis.y_axis.title = "%"
+    chart_basis.y_axis.crossAx = 500
+    chart_basis.y_axis.number_format = PERCENT0_FORMAT
+    chart_basis.x_axis = DateAxis(crossAx=100)
+    chart_basis.x_axis.number_format = DATE_FORMAT
+    chart_basis.x_axis.majorTimeUnit = "days"
+    chart_basis.x_axis.title = "Date"
+
+    data = Reference(ws_basis, min_col=6, min_row=1, max_col=8, max_row=ws_basis.max_row)
+    chart_basis.add_data(data, titles_from_data=True)
+    values = Reference(ws_basis, min_col=12, min_row=1, max_row=ws_basis.max_row)
+    series = Series(values, title_from_data=True)
+    chart_basis.series.append(series)
+    dates = Reference(ws_basis, min_col=1, min_row=2, max_row=ws_basis.max_row)
+    chart_basis.set_categories(dates)
+
+    # 收盘价图
+    chart_close = LineChart()
+    chart_close.y_axis.title = "close"
+    chart_close.y_axis.axId = 200
+    chart_close.y_axis.majorGridlines = None
+
+    close_min_str = str(int(basis_df[symbol].min()))
+    y_axis_min = int(close_min_str[0] + '0' * (len(close_min_str) - 1))
+    chart_close.y_axis.scaling.min = y_axis_min
+
+    values = Reference(ws_basis, min_col=4, min_row=1, max_row=ws_basis.max_row)
+    chart_close.add_data(values, titles_from_data=True)
+    s = chart_close.series[0]
+    s.graphicalProperties.line.dashStyle = "sysDash"
+    s.graphicalProperties.line.width = 3.0
+    chart_basis.y_axis.crosses = 'max'
+    chart_basis += chart_close
+    ws.add_chart(chart_basis, "B2")
+
+    # ws.add_chart(chart_close, "B32")
+
+    report_dir = REPORT_DIR / 'future'
+    future_filepath = report_dir / "{}{}.xlsx".format(code, datetime.today().strftime('%Y%m%d'))
     wb.save(future_filepath)
 
 
@@ -341,4 +415,7 @@ if __name__ == '__main__':
     # block_status_df.to_excel(writer, sheet_name='block_status')
     # roll_yield_df.to_excel(writer, sheet_name='roll_yield')
     # print(last_price_df)
-    generate_future_report()
+    code = 'I'
+    start_date = datetime(2016, 11, 24)
+    generate_future_detail_report(code=code, start_date=start_date)
+    # generate_future_report()
