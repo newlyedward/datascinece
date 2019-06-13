@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 from openpyxl import Workbook
-from openpyxl.chart import LineChart, Reference, Series
+from openpyxl.chart import LineChart, Reference, Series, BarChart, ScatterChart
 from openpyxl.chart.axis import DateAxis
 from openpyxl.styles import Alignment
 from openpyxl.utils.dataframe import dataframe_to_rows
@@ -15,6 +15,7 @@ from log import LogHandler
 from src.analysis import conn
 from src.analysis.setting import REPORT_DIR, TABLE_STYLE, COLOR_RULE, PERCENT_FORMAT, COMMA0_FORMAT, DATE_FORMAT, \
     PERCENT0_FORMAT
+from src.analysis.utils import histogram
 from src.api import get_peak_start_date, get_price, get_roll_yield
 from src.data.future.setting import CODE2NAME_MAP
 
@@ -391,10 +392,15 @@ def generate_future_detail_report(code, start_date):
     chart_close.add_data(values, titles_from_data=True)
     s = chart_close.series[0]
     s.graphicalProperties.line.dashStyle = "sysDash"
-    s.graphicalProperties.line.width = 3.0
+    # s.graphicalProperties.line.width = 3.0
     chart_basis.y_axis.crosses = 'max'
     chart_basis += chart_close
-    ws.add_chart(chart_basis, "B2")
+    ws.add_chart(chart_basis, "B35")
+
+    ws_hist = wb.create_sheet('histogram')
+    # 直方图 histogram
+    chart_basis_dist = histogram(ws_hist, basis_df['domain_basis'].values, bins=30)
+    ws.add_chart(chart_basis_dist, "B2")
 
     # ws.add_chart(chart_close, "B32")
 
