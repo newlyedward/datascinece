@@ -149,7 +149,7 @@ def split_symbol(pattern, s):
         pd.Series, idx 提取出信息对应的索引bool值
     """
     assert isinstance(s, pd.Series)
-
+    #
     split_s = s.transform(lambda x: re.search(pattern, str(x)))
     idx = ~split_s.isna().values
     if not idx.all():

@@ -385,8 +385,8 @@ def generate_future_detail_report(code, start_date):
     chart_close.y_axis.majorGridlines = None
 
     close_min_str = str(int(basis_df[symbol].min()))
-    y_axis_min = int(close_min_str[0] + '0' * (len(close_min_str) - 1))
-    chart_close.y_axis.scaling.min = y_axis_min
+    close_axis_min = int(close_min_str[0] + '0' * (len(close_min_str) - 1))
+    chart_close.y_axis.scaling.min = close_axis_min
 
     values = Reference(ws_basis, min_col=4, min_row=1, max_row=ws_basis.max_row)
     chart_close.add_data(values, titles_from_data=True)
@@ -399,8 +399,15 @@ def generate_future_detail_report(code, start_date):
 
     ws_hist = wb.create_sheet('histogram')
     # 直方图 histogram
-    chart_basis_dist = histogram(ws_hist, basis_df['domain_basis'].values, bins=30)
+    chart_basis_dist = histogram(ws_hist, basis_df['domain_basis'].values, title="Basis Distribution", bins=30)
+    chart_basis_dist.title = "Basis Distribution"
     ws.add_chart(chart_basis_dist, "B2")
+
+    chart_basis_dist = histogram(ws_hist, basis_df[symbol].values, title="Prices Distribution", bins=30)
+    chart_basis_dist.title = "Prices Distribution"
+    chart_basis_dist.x_axis.number_format = COMMA0_FORMAT
+    chart_basis_dist.x_axis.scaling.min = close_axis_min
+    ws.add_chart(chart_basis_dist, "N2")
 
     # ws.add_chart(chart_close, "B32")
 

@@ -20,7 +20,6 @@ from log import LogHandler
 # TIME_WAITING = 1
 log = LogHandler('data.log')
 
-
 # ----------------------------------download data from web-----------------
 def is_data_empty(data):
     """
